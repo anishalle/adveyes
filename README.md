@@ -1,8 +1,4 @@
 # ADVEYES
 
 This is a file
-
-
-
-
-testing from adam
+bring it all back

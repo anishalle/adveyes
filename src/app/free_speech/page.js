@@ -202,8 +202,8 @@ export default function Screening() {
             color: 'white', 
             fontWeight: '600',
             textShadow: '0 2px 10px rgba(0,0,0,0.1)'
-          }}>
-            ADHD Screening
+          }}
+          >Free Speech
           </h1>
 
           <div style={{ 

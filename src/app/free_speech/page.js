@@ -34,10 +34,73 @@ export default function Screening() {
         }
       };
 
-      mediaRecorderRef.current.onstop = () => {
+      mediaRecorderRef.current.onstop = async () => {
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        setAudioBlob(blob);
-        console.log('Recording saved, blob size:', blob.size);
+        
+        // Convert to WAV
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const arrayBuffer = await blob.arrayBuffer();
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        
+        // WAV conversion
+        const numChannels = audioBuffer.numberOfChannels;
+        const sampleRate = audioBuffer.sampleRate;
+        const format = 1; // PCM
+        const bitDepth = 16;
+
+        const bytesPerSample = bitDepth / 8;
+        const blockAlign = numChannels * bytesPerSample;
+
+        const channelData = [];
+        for (let i = 0; i < audioBuffer.numberOfChannels; i++) {
+          channelData.push(audioBuffer.getChannelData(i));
+        }
+
+        // Interleave channels
+        const length = channelData[0].length;
+        const interleaved = new Float32Array(length * channelData.length);
+        let offset = 0;
+        for (let i = 0; i < length; i++) {
+          for (let channel = 0; channel < channelData.length; channel++) {
+            interleaved[offset++] = channelData[channel][i];
+          }
+        }
+
+        const dataLength = interleaved.length * bytesPerSample;
+        const buffer = new ArrayBuffer(44 + dataLength);
+        const view = new DataView(buffer);
+
+        // Write WAV header
+        const writeString = (offset, string) => {
+          for (let i = 0; i < string.length; i++) {
+            view.setUint8(offset + i, string.charCodeAt(i));
+          }
+        };
+
+        writeString(0, 'RIFF');
+        view.setUint32(4, 36 + dataLength, true);
+        writeString(8, 'WAVE');
+        writeString(12, 'fmt ');
+        view.setUint32(16, 16, true);
+        view.setUint16(20, format, true);
+        view.setUint16(22, numChannels, true);
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * blockAlign, true);
+        view.setUint16(32, blockAlign, true);
+        view.setUint16(34, bitDepth, true);
+        writeString(36, 'data');
+        view.setUint32(40, dataLength, true);
+
+        // Write audio data (float to 16-bit PCM)
+        let writeOffset = 44;
+        for (let i = 0; i < interleaved.length; i++, writeOffset += 2) {
+          const s = Math.max(-1, Math.min(1, interleaved[i]));
+          view.setInt16(writeOffset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        }
+
+        const wavBlob = new Blob([buffer], { type: 'audio/wav' });
+        setAudioBlob(wavBlob);
+        console.log('Recording saved as WAV, blob size:', wavBlob.size);
       };
 
       mediaRecorderRef.current.start();
@@ -76,8 +139,9 @@ export default function Screening() {
       // Simulate upload delay
       await new Promise(resolve => setTimeout(resolve, 1500));
       
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-      const filename = `adhd-screening-${timestamp}.webm`;
+      const now = new Date();
+      const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD format
+      const filename = `free_speech_${dateStr}.wav`;
 
       // Download locally
       const url = URL.createObjectURL(audioBlob);

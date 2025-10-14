@@ -83,15 +83,17 @@ function generateProblemSet(count = 3) {
 export default function MathNumberSense() {
   const [problems, setProblems] = useState(null)
   const [currentProblemIndex, setCurrentProblemIndex] = useState(0)
-  const [isRecording, setIsRecording] = useState(false)
+  const [testStarted, setTestStarted] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
   const [testCompleted, setTestCompleted] = useState(false)
   const [uploadSuccess, setUploadSuccess] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [timeMarkers, setTimeMarkers] = useState([])
   const mediaRecorderRef = useRef(null)
   const audioContextRef = useRef(null)
-  const audioBuffersRef = useRef([])
+  const audioChunksRef = useRef([])
   const timerRef = useRef(null)
+  const testStartTimeRef = useRef(null)
 
   React.useEffect(() => {
     if (!problems) {
@@ -109,7 +111,7 @@ export default function MathNumberSense() {
     return <div style={{ padding: "2rem", textAlign: "center", fontSize: "1.2rem" }}>Loading...</div>
   }
 
-  const startRecording = async () => {
+  const startTest = async () => {
     try {
       // Initialize audio context once
       if (!audioContextRef.current) {
@@ -126,39 +128,33 @@ export default function MathNumberSense() {
       });
       
       mediaRecorderRef.current = new MediaRecorder(stream);
-      const audioChunks = [];
+      audioChunksRef.current = [];
       
       mediaRecorderRef.current.ondataavailable = (event) => {
         if (event.data.size > 0) {
-          audioChunks.push(event.data);
+          audioChunksRef.current.push(event.data);
         }
       };
 
       mediaRecorderRef.current.onstop = async () => {
-        const blob = new Blob(audioChunks, { type: 'audio/webm' });
-        const arrayBuffer = await blob.arrayBuffer();
-        const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
-        
-        // Store the decoded audio buffer
-        audioBuffersRef.current.push(audioBuffer);
-        
-        setIsRecording(false);
-        clearInterval(timerRef.current);
         stream.getTracks().forEach(track => track.stop());
-        
-        // Auto-advance to next problem
-        setTimeout(() => {
-          if (currentProblemIndex < problems.length - 1) {
-            setCurrentProblemIndex(currentProblemIndex + 1);
-            setRecordingTime(0);
-          } else {
-            setTestCompleted(true);
-          }
-        }, 500);
+        setTestCompleted(true);
+        clearInterval(timerRef.current);
       };
 
+      // Record start time
+      testStartTimeRef.current = Date.now();
+      
+      // Add initial marker for problem 1
+      setTimeMarkers([{
+        problemIndex: 0,
+        timestamp: 0,
+        unixTime: testStartTimeRef.current,
+        description: problems[0].description
+      }]);
+
       mediaRecorderRef.current.start();
-      setIsRecording(true);
+      setTestStarted(true);
       setRecordingTime(0);
 
       timerRef.current = setInterval(() => {
@@ -171,43 +167,29 @@ export default function MathNumberSense() {
     }
   }
 
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+  const stopTest = () => {
+    if (mediaRecorderRef.current && testStarted) {
       mediaRecorderRef.current.stop();
     }
   }
 
-  const combineAudioBuffers = () => {
-    if (audioBuffersRef.current.length === 0) return null;
-
-    const audioContext = audioContextRef.current;
-    let totalLength = 0;
-
-    // Calculate total length
-    for (const buffer of audioBuffersRef.current) {
-      totalLength += buffer.length;
+  const goToNextProblem = () => {
+    if (currentProblemIndex < problems.length - 1) {
+      const currentTime = Date.now() - testStartTimeRef.current;
+      const newIndex = currentProblemIndex + 1;
+      
+      setTimeMarkers(prev => [...prev, {
+        problemIndex: newIndex,
+        timestamp: currentTime,
+        unixTime: Date.now(),
+        description: problems[newIndex].description
+      }]);
+      
+      setCurrentProblemIndex(newIndex);
+    } else {
+      stopTest();
     }
-
-    // Create combined buffer
-    const combinedBuffer = audioContext.createBuffer(
-      1,
-      totalLength,
-      audioBuffersRef.current[0].sampleRate
-    );
-    const combinedData = combinedBuffer.getChannelData(0);
-
-    // Copy each buffer's data directly
-    let offset = 0;
-    for (const buffer of audioBuffersRef.current) {
-      const sourceData = buffer.getChannelData(0);
-      for (let i = 0; i < sourceData.length; i++) {
-        combinedData[offset + i] = sourceData[i];
-      }
-      offset += buffer.length;
-    }
-
-    return combinedBuffer;
-  };
+  }
 
   const audioBufferToWav = (audioBuffer) => {
     const numberOfChannels = audioBuffer.numberOfChannels;
@@ -275,37 +257,69 @@ export default function MathNumberSense() {
   };
 
   const handleDownload = async () => {
-    if (audioBuffersRef.current.length === 0) {
-      alert('No recordings available');
+    if (audioChunksRef.current.length === 0) {
+      alert('No recording available');
       return;
     }
 
     setUploading(true);
 
     try {
-      const combinedBuffer = combineAudioBuffers();
-      const wavBlob = audioBufferToWav(combinedBuffer);
+      const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+      const arrayBuffer = await audioBlob.arrayBuffer();
+      const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
+      const wavBlob = audioBufferToWav(audioBuffer);
       
       const now = new Date();
       const dateStr = now.toISOString().split('T')[0];
-      const filename = `math_number_sense_${dateStr}.wav`;
+      const audioFilename = `math_number_sense_${dateStr}.wav`;
+      const markersFilename = `math_number_sense_markers_${dateStr}.json`;
 
-      const url = URL.createObjectURL(wavBlob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      // Download audio file
+      const audioUrl = URL.createObjectURL(wavBlob);
+      const audioLink = document.createElement('a');
+      audioLink.href = audioUrl;
+      audioLink.download = audioFilename;
+      document.body.appendChild(audioLink);
+      audioLink.click();
+      document.body.removeChild(audioLink);
       
       setTimeout(() => {
-        URL.revokeObjectURL(url);
+        URL.revokeObjectURL(audioUrl);
+      }, 100);
+
+      // Download markers file
+      const markersData = {
+        testDate: new Date().toISOString(),
+        totalDuration: recordingTime,
+        problems: problems.map((p, idx) => ({
+          index: idx,
+          description: p.description,
+          type: p.type,
+          product: p.product,
+          comparisonNumber: p.comparisonNumber,
+          isLargerThanComparison: p.isLargerThanComparison
+        })),
+        timeMarkers: timeMarkers
+      };
+
+      const markersBlob = new Blob([JSON.stringify(markersData, null, 2)], { type: 'application/json' });
+      const markersUrl = URL.createObjectURL(markersBlob);
+      const markersLink = document.createElement('a');
+      markersLink.href = markersUrl;
+      markersLink.download = markersFilename;
+      document.body.appendChild(markersLink);
+      markersLink.click();
+      document.body.removeChild(markersLink);
+      
+      setTimeout(() => {
+        URL.revokeObjectURL(markersUrl);
       }, 100);
 
       setUploadSuccess(true);
     } catch (error) {
       console.error('Error downloading:', error);
-      alert('Error downloading recordings. Please try again.');
+      alert('Error downloading files. Please try again.');
     } finally {
       setUploading(false);
     }
@@ -315,10 +329,13 @@ export default function MathNumberSense() {
     const newProblems = generateProblemSet(3);
     setProblems(newProblems);
     setCurrentProblemIndex(0);
-    audioBuffersRef.current = [];
+    audioChunksRef.current = [];
+    setTimeMarkers([]);
+    setTestStarted(false);
     setTestCompleted(false);
     setUploadSuccess(false);
     setRecordingTime(0);
+    testStartTimeRef.current = null;
     if (audioContextRef.current) {
       audioContextRef.current.close();
       audioContextRef.current = null;
@@ -393,22 +410,6 @@ export default function MathNumberSense() {
     boxShadow: "0 2px 4px rgba(0, 0, 0, 0.05)"
   }
 
-  const recordBtnStyle = {
-    width: "140px",
-    height: "140px",
-    borderRadius: "50%",
-    border: "none",
-    background: isRecording 
-      ? "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)" 
-      : "linear-gradient(135deg, #28a745 0%, #20c997 100%)",
-    color: "white",
-    cursor: "pointer",
-    fontSize: "0.9rem",
-    fontWeight: 700,
-    boxShadow: "0 4px 15px rgba(0, 0, 0, 0.2)",
-    transition: "transform 0.2s"
-  }
-
   const progressStyle = {
     margin: "1.5rem 0 2rem 0",
     fontSize: "0.95rem",
@@ -434,10 +435,10 @@ export default function MathNumberSense() {
           ✓
         </div>
         <div style={{ fontSize: "1.3rem", margin: "1.5rem 0", fontWeight: 600, color: uploadSuccess ? "#28a745" : "#2d3748" }}>
-          {uploadSuccess ? 'Download Complete!' : 'All Recordings Ready'}
+          {uploadSuccess ? 'Download Complete!' : 'Test Recording Ready'}
         </div>
         <div style={{ margin: "1rem 0", color: "#666", fontSize: "1rem" }}>
-          {audioBuffersRef.current.length} out of {problems.length} problems recorded
+          {timeMarkers.length} problems completed • Total time: {formatTime(recordingTime)}
         </div>
         
         {!uploadSuccess && (
@@ -453,13 +454,13 @@ export default function MathNumberSense() {
               fontSize: "1.05rem"
             }}
           >
-            {uploading ? 'Processing...' : 'Download Combined Audio'}
+            {uploading ? 'Processing...' : 'Download Audio & Markers'}
           </button>
         )}
 
         {uploadSuccess && (
           <p style={{ color: "#28a745", marginBottom: "1.5rem", fontSize: "0.95rem" }}>
-            Recording downloaded successfully
+            Audio and markers file downloaded successfully
           </p>
         )}
 
@@ -473,6 +474,57 @@ export default function MathNumberSense() {
         >
           Start New Test
         </button>
+      </div>
+    )
+  }
+
+  if (!testStarted) {
+    return (
+      <div style={containerStyle}>
+        <div style={headerStyle}>
+          MATH & NUMBER SENSE
+        </div>
+        
+        <div style={{ 
+          fontSize: "1.2rem", 
+          margin: "2rem 0", 
+          color: "#555",
+          lineHeight: "1.8"
+        }}>
+          <p style={{ marginBottom: "1rem" }}>
+            You will be shown {problems.length} multiplication problems.
+          </p>
+          <p style={{ marginBottom: "1rem" }}>
+            For each problem, state whether the solution is <strong>larger</strong> than the comparison number shown.
+          </p>
+          <p style={{ marginBottom: "1rem" }}>
+            The test will record continuously. Click <strong>Continue</strong> to move to the next problem.
+          </p>
+        </div>
+
+        <button 
+          style={{
+            ...btnStyle,
+            padding: "1.5rem 3rem",
+            fontSize: "1.2rem",
+            marginTop: "2rem"
+          }}
+          onClick={startTest}
+        >
+          Start Test
+        </button>
+
+        <div style={{ 
+          marginTop: "2rem", 
+          padding: "1.5rem",
+          backgroundColor: "#fff3cd",
+          borderRadius: "10px",
+          fontSize: "0.9rem",
+          color: "#856404",
+          lineHeight: "1.6"
+        }}>
+          <strong>Note:</strong> Please allow microphone access when prompted. Recording will begin automatically when you start the test.
+        </div>
       </div>
     )
   }
@@ -503,59 +555,29 @@ export default function MathNumberSense() {
         {formatTime(recordingTime)}
       </div>
 
-      <div style={{ margin: "2rem 0" }}>
-        <button 
-          style={secondaryBtnStyle} 
-          onClick={() => {
-            if (currentProblemIndex > 0) {
-              setCurrentProblemIndex(currentProblemIndex - 1);
-              setRecordingTime(0);
-            }
-          }}
-          disabled={currentProblemIndex === 0}
-        >
-          Previous
-        </button>
-
-        <button 
-          style={secondaryBtnStyle} 
-          onClick={() => {
-            if (currentProblemIndex < problems.length - 1) {
-              setCurrentProblemIndex(currentProblemIndex + 1);
-              setRecordingTime(0);
-            }
-          }}
-          disabled={currentProblemIndex === problems.length - 1}
-        >
-          Skip
-        </button>
+      <div style={{ 
+        margin: "1rem 0",
+        padding: "0.75rem",
+        backgroundColor: "#ffe6e6",
+        borderRadius: "8px",
+        color: "#d32f2f",
+        fontWeight: 600,
+        fontSize: "0.95rem"
+      }}>
+        🔴 Recording in progress
       </div>
 
       <div style={{ margin: "2rem 0" }}>
         <button 
-          style={recordBtnStyle}
-          onClick={isRecording ? stopRecording : startRecording}
-          onMouseOver={(e) => {
-            if (!isRecording) e.currentTarget.style.transform = 'scale(1.08)';
+          style={{
+            ...btnStyle,
+            padding: "1rem 3rem",
+            fontSize: "1.1rem"
           }}
-          onMouseOut={(e) => {
-            e.currentTarget.style.transform = 'scale(1)';
-          }}
+          onClick={goToNextProblem}
         >
-          {isRecording ? 'STOP' : 'RECORD'}
+          {currentProblemIndex < problems.length - 1 ? 'Continue' : 'Finish Test'}
         </button>
-        
-        {isRecording && (
-          <div style={{ marginTop: "1rem", color: "#f5576c", fontWeight: 600 }}>
-            🔴 Recording...
-          </div>
-        )}
-
-        {audioBuffersRef.current.length > currentProblemIndex && (
-          <div style={{ marginTop: "1rem", color: "#28a745", fontWeight: 600 }}>
-            ✓ Recorded
-          </div>
-        )}
       </div>
 
       <div style={{ 
@@ -567,7 +589,7 @@ export default function MathNumberSense() {
         color: "#555",
         lineHeight: "1.6"
       }}>
-        <strong style={{color: "#0066cc"}}>Instructions:</strong> State whether the solution is larger than the number shown. Press STOP to pause and move to the next problem. All recordings will be combined into one file at the end.
+        <strong style={{color: "#0066cc"}}>Instructions:</strong> State your answer aloud, then click Continue to move to the next problem. The recording is continuous and will include timestamps for each question.
       </div>
     </div>
   )

@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import styles from "./page.module.css";
 
 export default function Home() {
@@ -44,6 +45,9 @@ export default function Home() {
           >
             Read our docs
           </a>
+          <Link href="/math_number_sense" className={styles.secondary}>
+            Math Number Sense
+          </Link>
         </div>
       </main>
       <footer className={styles.footer}>

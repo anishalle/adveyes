@@ -1,9 +1,9 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState } from "react"
 
 function randInt(min, max) {
-     return Math.floor(Math.random() * (max - min + 1)) + min
+  return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
 function generateComparisonNumber(problem) {
@@ -90,258 +90,255 @@ function generateProblemSet(count = 15) {
   return problems;
 }
 
-export default function Home() {
-     const [problems, setProblems] = useState([])
-     const [currentProblemIndex, setCurrentProblemIndex] = useState(0)
-     const [audioRecording, setAudioRecording] = useState(false)
-     const [recordedAudio, setRecordedAudio] = useState({})
-     const [testCompleted, setTestCompleted] = useState(false)
+export default function MathNumberSense() {
+  const [problems, setProblems] = useState(() => generateProblemSet(15))
+  const [currentProblemIndex, setCurrentProblemIndex] = useState(0)
+  const [audioRecording, setAudioRecording] = useState(false)
+  const [recordedAudio, setRecordedAudio] = useState({})
+  const [testCompleted, setTestCompleted] = useState(false)
+  const [mediaRecorder, setMediaRecorder] = useState(null)
 
-     useEffect(() => {
-       setProblems(generateProblemSet(15))
-     }, [])
 
-     const currentProblem = problems[currentProblemIndex]
 
-     function nextProblem() {
+  const currentProblem = problems[currentProblemIndex]
+
+  function nextProblem() {
+    if (currentProblemIndex < problems.length - 1) {
+      setCurrentProblemIndex(currentProblemIndex + 1)
+    } else {
+      setTestCompleted(true)
+    }
+  }
+
+  function prevProblem() {
+    if (currentProblemIndex > 0) {
+      setCurrentProblemIndex(currentProblemIndex - 1)
+    }
+  }
+
+  function restartTest() {
+    setProblems(generateProblemSet(15))
+    setCurrentProblemIndex(0)
+    setRecordedAudio({})
+    setTestCompleted(false)
+  }
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+      const audioChunks = []
+      
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunks.push(event.data)
+        }
+      }
+      
+      recorder.onstop = () => {
+        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' })
+        const audioUrl = URL.createObjectURL(audioBlob)
+        setRecordedAudio(prev => ({
+          ...prev,
+          [currentProblemIndex]: audioUrl
+        }))
+        setAudioRecording(false)
+        
+        // Stop all tracks
+        stream.getTracks().forEach(track => track.stop())
+        
+        // Auto-advance to next problem after recording
+        setTimeout(() => {
           if (currentProblemIndex < problems.length - 1) {
-               setCurrentProblemIndex(currentProblemIndex + 1)
+            setCurrentProblemIndex(currentProblemIndex + 1)
           } else {
-               setTestCompleted(true)
+            setTestCompleted(true)
           }
-     }
+        }, 1000)
+      }
+      
+      recorder.start()
+      setAudioRecording(true)
+      setMediaRecorder(recorder)
+    } catch (error) {
+      console.error("Error accessing microphone:", error)
+      alert("Could not access microphone. Please check permissions.")
+    }
+  }
 
-     function prevProblem() {
-          if (currentProblemIndex > 0) {
-               setCurrentProblemIndex(currentProblemIndex - 1)
-          }
-     }
+  function stopRecording() {
+    if (mediaRecorder && audioRecording) {
+      mediaRecorder.stop()
+      setMediaRecorder(null)
+    }
+  }
 
-     function restartTest() {
-       setProblems(generateProblemSet(15))
-       setCurrentProblemIndex(0)
-       setRecordedAudio({})
-       setTestCompleted(false)
-     }
+  const containerStyle = {
+    fontFamily: "Inter, Roboto, system-ui, -apple-system, 'Segoe UI', Arial",
+    padding: "2rem",
+    maxWidth: 600,
+    margin: "2rem auto",
+    textAlign: "center",
+  }
 
-     async function startRecording() {
-          try {
-               const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-               const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/wav' })
-               const audioChunks = []
-               
-               mediaRecorder.ondataavailable = (event) => {
-                    if (event.data.size > 0) {
-                         audioChunks.push(event.data)
-                    }
-               }
-               
-               mediaRecorder.onstop = () => {
-                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' })
-                    const audioUrl = URL.createObjectURL(audioBlob)
-                    setRecordedAudio(prev => ({
-                         ...prev,
-                         [currentProblemIndex]: audioUrl
-                    }))
-                    setAudioRecording(false)
-                    
-                    // Stop all tracks
-                    stream.getTracks().forEach(track => track.stop())
-                    
-                    // Auto-advance to next problem after recording
-                    setTimeout(() => {
-                      if (currentProblemIndex < problems.length - 1) {
-                        setCurrentProblemIndex(currentProblemIndex + 1)
-                      } else {
-                        setTestCompleted(true)
-                      }
-                    }, 1000)
-               }
-               
-               mediaRecorder.start()
-               setAudioRecording(true)
-               
-               // Store mediaRecorder in a ref to stop it later
-               window.currentMediaRecorder = mediaRecorder
-          } catch (error) {
-               console.error("Error accessing microphone:", error)
-               alert("Could not access microphone. Please check permissions.")
-          }
-     }
+  const headerStyle = {
+    fontSize: "1.5rem",
+    fontWeight: 600,
+    marginBottom: "1.5rem",
+    color: "#1a1a1a"
+  }
 
-     function stopRecording() {
-          if (window.currentMediaRecorder && audioRecording) {
-               window.currentMediaRecorder.stop()
-          }
-     }
+  const problemStyle = {
+    fontSize: "2.5rem",
+    fontWeight: 600,
+    margin: "2rem 0",
+    padding: "1.5rem",
+    backgroundColor: "#f8f9fa",
+    borderRadius: "8px",
+    border: "1px solid #e9ecef"
+  }
 
-     const containerStyle = {
-          fontFamily: "Inter, Roboto, system-ui, -apple-system, 'Segoe UI', Arial",
-          padding: "2rem",
-          maxWidth: 600,
-          margin: "2rem auto",
-          textAlign: "center",
-     }
+  const comparisonStyle = {
+    fontSize: "1.25rem",
+    margin: "1.5rem 0",
+    padding: "1rem",
+    backgroundColor: "#e7f3ff",
+    borderRadius: "6px",
+    border: "1px solid #b3d9ff"
+  }
 
-     const headerStyle = {
-          fontSize: "1.5rem",
-          fontWeight: 600,
-          marginBottom: "1.5rem",
-          color: "#1a1a1a"
-     }
+  const btnStyle = {
+    padding: "0.75rem 1.5rem",
+    margin: "0.5rem",
+    fontSize: "1rem",
+    borderRadius: "6px",
+    border: "1px solid #007acc",
+    background: "#007acc",
+    color: "white",
+    cursor: "pointer",
+    transition: "all 0.2s"
+  }
 
-     const problemStyle = {
-          fontSize: "2.5rem",
-          fontWeight: 600,
-          margin: "2rem 0",
-          padding: "1.5rem",
-          backgroundColor: "#f8f9fa",
-          borderRadius: "8px",
-          border: "1px solid #e9ecef"
-     }
+  const secondaryBtnStyle = {
+    ...btnStyle,
+    background: "white",
+    color: "#007acc",
+  }
 
-     const comparisonStyle = {
-          fontSize: "1.25rem",
-          margin: "1.5rem 0",
-          padding: "1rem",
-          backgroundColor: "#e7f3ff",
-          borderRadius: "6px",
-          border: "1px solid #b3d9ff"
-     }
+  const recordBtnStyle = {
+    ...btnStyle,
+    background: audioRecording ? "#dc3545" : "#28a745",
+    border: audioRecording ? "1px solid #dc3545" : "1px solid #28a745"
+  }
 
-     const btnStyle = {
-          padding: "0.75rem 1.5rem",
-          margin: "0.5rem",
-          fontSize: "1rem",
-          borderRadius: "6px",
-          border: "1px solid #007acc",
-          background: "#007acc",
-          color: "white",
-          cursor: "pointer",
-          transition: "all 0.2s"
-     }
+  const completeBtnStyle = {
+    ...btnStyle,
+    background: "#28a745",
+    border: "1px solid #28a745",
+    fontSize: "1.1rem",
+    padding: "1rem 2rem"
+  }
 
-     const secondaryBtnStyle = {
-          ...btnStyle,
-          background: "white",
-          color: "#007acc",
-     }
+  const progressStyle = {
+    margin: "1rem 0",
+    fontSize: "0.9rem",
+    color: "#666"
+  }
 
-     const recordBtnStyle = {
-          ...btnStyle,
-          background: audioRecording ? "#dc3545" : "#28a745",
-          border: audioRecording ? "1px solid #dc3545" : "1px solid #28a745"
-     }
+  if (testCompleted) {
+    return (
+      <div style={containerStyle}>
+        <div style={headerStyle}>
+          Test Completed!
+        </div>
+        <div style={{ fontSize: "1.2rem", margin: "2rem 0" }}>
+          You have completed all 15 problems. Great job!
+        </div>
+        <div style={{ margin: "1rem 0", color: "#666" }}>
+          Recorded {Object.keys(recordedAudio).length} out of 15 problems
+        </div>
+        <button style={completeBtnStyle} onClick={restartTest}>
+          Start New Test
+        </button>
+      </div>
+    )
+  }
 
-     const completeBtnStyle = {
-          ...btnStyle,
-          background: "#28a745",
-          border: "1px solid #28a745",
-          fontSize: "1.1rem",
-          padding: "1rem 2rem"
-     }
+  if (!currentProblem) {
+    return <div style={containerStyle}>Loading problems...</div>
+  }
 
-     const progressStyle = {
-          margin: "1rem 0",
-          fontSize: "0.9rem",
-          color: "#666"
-     }
+  return (
+    <div style={containerStyle}>
+      <div style={headerStyle}>
+        MATH & NUMBER SENSE
+      </div>
 
-     if (testCompleted) {
-       return (
-         <div style={containerStyle}>
-           <div style={headerStyle}>
-             Test Completed!
-           </div>
-           <div style={{ fontSize: "1.2rem", margin: "2rem 0" }}>
-             You have completed all 15 problems. Great job!
-           </div>
-           <div style={{ margin: "1rem 0", color: "#666" }}>
-             Recorded {Object.keys(recordedAudio).length} out of 15 problems
-           </div>
-           <button style={completeBtnStyle} onClick={restartTest}>
-             Start New Test
-           </button>
-         </div>
-       )
-     }
+      <div style={progressStyle}>
+        Problem {currentProblemIndex + 1} of {problems.length}
+      </div>
 
-     if (!currentProblem) {
-       return <div style={containerStyle}>Loading problems...</div>
-     }
+      <div style={problemStyle} aria-live="polite">
+        {currentProblem.description}
+      </div>
 
-     return (
-          <div style={containerStyle}>
-               <div style={headerStyle}>
-                    MATH & NUMBER SENSE
-               </div>
+      <div style={{...problemStyle, fontSize: "1.1rem"}}>
+        Type: {currentProblem.type}
+      </div>
 
-               <div style={progressStyle}>
-                    Problem {currentProblemIndex + 1} of {problems.length}
-               </div>
+      <div style={comparisonStyle}>
+        Is it larger than: <strong>{currentProblem.comparisonNumber}</strong>?
+      </div>
 
-               <div style={problemStyle} aria-live="polite">
-                    {currentProblem.description}
-               </div>
+      <div style={{ margin: "2rem 0" }}>
+        <button 
+          style={secondaryBtnStyle} 
+          onClick={prevProblem}
+          disabled={currentProblemIndex === 0}
+        >
+          Previous Problem
+        </button>
 
-               <div style={{...problemStyle, fontSize: "1.1rem"}}>
-                    Type: {currentProblem.type}
-               </div>
+        <button 
+          style={secondaryBtnStyle} 
+          onClick={nextProblem}
+          disabled={currentProblemIndex === problems.length - 1}
+        >
+          Skip & Next Problem
+        </button>
+      </div>
 
-               <div style={comparisonStyle}>
-                    Is it larger than: <strong>{currentProblem.comparisonNumber}</strong>?
-               </div>
-
-               <div style={{ margin: "2rem 0" }}>
-                    <button 
-                         style={secondaryBtnStyle} 
-                         onClick={prevProblem}
-                         disabled={currentProblemIndex === 0}
-                    >
-                         Previous Problem
-                    </button>
-
-                    <button 
-                         style={secondaryBtnStyle} 
-                         onClick={nextProblem}
-                         disabled={currentProblemIndex === problems.length - 1}
-                    >
-                         Skip & Next Problem
-                    </button>
-               </div>
-
-               <div style={{ margin: "2rem 0" }}>
-                    <button 
-                         style={recordBtnStyle}
-                         onClick={audioRecording ? stopRecording : startRecording}
-                         disabled={audioRecording}
-                    >
-                         {audioRecording ? "Recording... Click to Stop" : "Record Your Answer"}
-                    </button>
-                    
-                    {recordedAudio[currentProblemIndex] && (
-                         <div style={{ marginTop: "1rem" }}>
-                              <div style={{ fontSize: "0.9rem", color: "#28a745", marginBottom: "0.5rem" }}>
-                                   ✓ Recording saved - advancing to next problem...
-                              </div>
-                              <audio controls src={recordedAudio[currentProblemIndex]} style={{ marginTop: "0.5rem" }} />
-                              <div style={{ fontSize: "0.8rem", color: "#28a745", marginTop: "0.25rem" }}>
-                                   Audio saved as WAV format
-                              </div>
-                         </div>
-                    )}
-               </div>
-
-               <div style={{ 
-                    marginTop: "2rem", 
-                    padding: "1rem",
-                    backgroundColor: "#f8f9fa",
-                    borderRadius: "6px",
-                    fontSize: "0.9rem",
-                    color: "#666"
-               }}>
-                    <strong>Instructions:</strong> State whether the solution to the expression is larger than the number shown and explain your reasoning. After recording your answer, you will automatically advance to the next problem. Complete all 15 problems.
-               </div>
+      <div style={{ margin: "2rem 0" }}>
+        <button 
+          style={recordBtnStyle}
+          onClick={audioRecording ? stopRecording : startRecording}
+        >
+          {audioRecording ? "Recording... Click to Stop" : "Record Your Answer"}
+        </button>
+        
+        {recordedAudio[currentProblemIndex] && (
+          <div style={{ marginTop: "1rem" }}>
+            <div style={{ fontSize: "0.9rem", color: "#28a745", marginBottom: "0.5rem" }}>
+              ✓ Recording saved - advancing to next problem...
+            </div>
+            <audio controls src={recordedAudio[currentProblemIndex]} style={{ marginTop: "0.5rem" }} />
+            <div style={{ fontSize: "0.8rem", color: "#28a745", marginTop: "0.25rem" }}>
+              Audio saved as WEBM format
+            </div>
           </div>
-     )
+        )}
+      </div>
+
+      <div style={{ 
+        marginTop: "2rem", 
+        padding: "1rem",
+        backgroundColor: "#f8f9fa",
+        borderRadius: "6px",
+        fontSize: "0.9rem",
+        color: "#666"
+      }}>
+        <strong>Instructions:</strong> State whether the solution to the expression is larger than the number shown and explain your reasoning. After recording your answer, you will automatically advance to the next problem. Complete all 15 problems.
+      </div>
+    </div>
+  )
 }

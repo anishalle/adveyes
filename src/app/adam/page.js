@@ -37,11 +37,13 @@ html,body {
 }
 
 .card {
-  width:min(980px,92vw);
-  padding:24px;
+  width:min(840px,92vw);
+  padding:12px 14px;
   border-radius:16px;
   background:#16171a;
   box-shadow:0 10px 30px rgba(0,0,0,.35);
+  box-sizing:border-box;
+  display:flex; flex-direction:column; align-items:stretch;
 }
 
 h1,h2 { margin:0 0 12px; }
@@ -57,8 +59,8 @@ button:hover{ background:#2a2e35; }
 .row{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
 
 .hud{
-  display:flex; justify-content:space-between; gap:12px;
-  margin-bottom:10px; color:#cfd2d6; font-size:14px; flex-wrap:wrap;
+  display:flex; justify-content:space-between; gap:6px;
+  margin-bottom:4px; color:#cfd2d6; font-size:11px; flex-wrap:wrap;
 }
 
 .progress{ height:6px; background:#24262b; border-radius:999px; overflow:hidden; }
@@ -70,9 +72,9 @@ button:hover{ background:#2a2e35; }
 /* ===== Centered Letter Box (Arena) ===== */
 .arena{
   position:relative !important; z-index:2;   /* positioning context for edges */
-  width:min(900px, 90vw);
+  width:100%;
   aspect-ratio:16 / 10;
-  margin:24px auto;
+  margin:12px 0;
   background:#0b0c0f;
   border:1px solid #1e2126;
   border-radius:14px;
@@ -101,7 +103,7 @@ button:hover{ background:#2a2e35; }
 .letter{
   position:relative; z-index:6; /* above mask & edges */
   font-weight:800;
-  font-size:clamp(64px,14vw,140px);
+  font-size:clamp(56px,12.5vw,120px);
   letter-spacing:2px;
   user-select:none;
 }
@@ -130,13 +132,18 @@ button:hover{ background:#2a2e35; }
 
 /* Flashes live *inside* the arena only */
 .edge{
-  position:absolute !important; /* enforce arena-relative */
+  position:absolute !important;
   background:#c7d2fe;
   opacity:.55;
   border-radius:6px;
   will-change:opacity,transform;
   pointer-events:none;
-  z-index:2;           /* under .inner (5) and .letter (6) */
+  z-index:2; /* sits below the card so flashes are visible outside the arena */
+}
+
+.distractor-layer{
+  position:absolute; inset:0; pointer-events:none;
+  z-index:1; /* fills the wrap behind the card so distractors appear in empty space */
 }
 
 .summary{
@@ -181,6 +188,9 @@ export default function Page(){
   const outerRef = useRef(null);
   const innerRef = useRef(null);
   const letterRef = useRef(null);
+  const wrapRef = useRef(null);
+  const bgRef = useRef(null);
+  const cardRef = useRef(null);
 
   const dataRef = useRef([]);
 
@@ -321,8 +331,9 @@ const makePlan = useCallback(() => {
   const clearTimers = useCallback(()=>{
     timers.current.forEach(clearTimeout); timers.current = [];
     if (rafRef.current) cancelAnimationFrame(rafRef.current); rafRef.current = null;
-    // scoped cleanup of distractors
+    // scoped cleanup of distractors in either layer
     arenaRef.current?.querySelectorAll(".edge").forEach(n => n.remove());
+    bgRef.current?.querySelectorAll(".edge").forEach(n => n.remove());
   },[]);
 
   const startTask = ()=>{
@@ -447,38 +458,56 @@ const makePlan = useCallback(() => {
   const spawnEdgeFlash = (level, onsetMs, durMs) => {
     const arenaEl  = arenaRef.current;
     const letterEl = letterRef.current;
-    if (!arenaEl) return null;
-
-    if (getComputedStyle(arenaEl).position === "static") {
-      arenaEl.style.position = "relative";
-    }
+    const bgEl = bgRef.current || wrapRef.current;
+    if (!arenaEl || !bgEl) return null;
 
     const aRect = arenaEl.getBoundingClientRect();
-    const W = arenaEl.clientWidth;
-    const H = arenaEl.clientHeight;
+    const wrapRect = bgEl.getBoundingClientRect();
+    const W = wrapRect.width;
+    const H = wrapRect.height;
 
-    // Forbidden: real letter rect (+ moat), fallback to central box if letter not ready
+    // Forbidden: prefer the whole card rect (includes HUD). fallback to arena/letter if card not ready.
     const PAD = 18;
-    let forbid = { left: W*0.34, top: H*0.34, right: W*0.66, bottom: H*0.66 };
-    if (letterEl) {
-      const lRect = letterEl.getBoundingClientRect();
-      const lLeft   = lRect.left   - aRect.left;
-      const lTop    = lRect.top    - aRect.top;
-      const lRight  = lRect.right  - aRect.left;
-      const lBottom = lRect.bottom - aRect.top;
+    let forbid = null;
+    const cardEl = cardRef.current;
+    if (cardEl) {
+      const cRect = cardEl.getBoundingClientRect();
       forbid = {
-        left:   clamp(lLeft   - PAD, 0, W),
-        top:    clamp(lTop    - PAD, 0, H),
-        right:  clamp(lRight  + PAD, 0, W),
-        bottom: clamp(lBottom + PAD, 0, H),
+        left:   clamp(cRect.left - wrapRect.left - PAD, 0, W),
+        top:    clamp(cRect.top  - wrapRect.top  - PAD, 0, H),
+        right:  clamp(cRect.right - wrapRect.left + PAD, 0, W),
+        bottom: clamp(cRect.bottom - wrapRect.top + PAD, 0, H),
       };
+    } else {
+      // fallback to arena/letter based forbid area
+      forbid = {
+        left: aRect.left + aRect.width * 0.34 - wrapRect.left,
+        top:  aRect.top  + aRect.height * 0.34 - wrapRect.top,
+        right: aRect.left + aRect.width * 0.66 - wrapRect.left,
+        bottom: aRect.top + aRect.height * 0.66 - wrapRect.top,
+      };
+      if (letterEl) {
+        const lRect = letterEl.getBoundingClientRect();
+        const lLeft   = lRect.left   - wrapRect.left;
+        const lTop    = lRect.top    - wrapRect.top;
+        const lRight  = lRect.right  - wrapRect.left;
+        const lBottom = lRect.bottom - wrapRect.top;
+        forbid = {
+          left:   clamp(lLeft   - PAD, 0, W),
+          top:    clamp(lTop    - PAD, 0, H),
+          right:  clamp(lRight  + PAD, 0, W),
+          bottom: clamp(lBottom + PAD, 0, H),
+        };
+      }
     }
 
-    // Element size/orientation
+    // Element size/orientation (use arena dimensions for length scaling)
     const isH = Math.random() < 0.5;
+    const aW = arenaEl.clientWidth;
+    const aH = arenaEl.clientHeight;
     const thickness = level === "low" ? 8 : 16;
     const lenFrac   = level === "low" ? (0.20 + Math.random()*0.20) : (0.32 + Math.random()*0.26);
-    const length    = Math.round((isH ? W : H) * lenFrac);
+    const length    = Math.round((isH ? aW : aH) * lenFrac);
 
     const el = document.createElement("div");
     el.className = "edge";
@@ -495,7 +524,7 @@ const makePlan = useCallback(() => {
       return !(rR < forbid.left || rL > forbid.right || rB < forbid.top || rT > forbid.bottom);
     };
 
-    // Four “lobe” regions outside the forbidden rect
+    // Four “lobe” regions outside the forbidden rect (in wrap/bg coords)
     const regions = [];
     if (forbid.top - elH > 0)                                             regions.push({ xMin: 0, xMax: W - elW, yMin: 0, yMax: forbid.top - elH });
     if (H - forbid.bottom - elH > 0)                                      regions.push({ xMin: 0, xMax: W - elW, yMin: forbid.bottom, yMax: H - elH });
@@ -515,16 +544,10 @@ const makePlan = useCallback(() => {
     }
     if (overlaps(x, y)) return null;
 
-    // Place inside arena
+    // Place inside bg layer (wrap coords)
     el.style.left = `${x}px`;
     el.style.top  = `${y}px`;
-    arenaEl.appendChild(el);
-
-    // Post-append verification
-    const after = el.getBoundingClientRect();
-    const ax = after.left - aRect.left;
-    const ay = after.top  - aRect.top;
-    if (overlaps(ax, ay)) { el.remove(); return null; }
+    bgEl.appendChild(el);
 
     // Animate & cleanup
     const startTimer = window.setTimeout(() => {
@@ -542,7 +565,7 @@ const makePlan = useCallback(() => {
     }, Math.round(onsetMs));
     timers.current.push(startTimer);
 
-    return { type:"arena-flash", x, y };
+    return { type:"bg-flash", x, y };
   };
 
   const downloadCSV = ()=>{
@@ -560,9 +583,9 @@ const makePlan = useCallback(() => {
   const pct = (trialInBlock / CFG.TRIALS_PER_BLOCK) * 100;
 
   return (
-    <div className="wrap">
+    <div className="wrap" ref={wrapRef}>
       <style dangerouslySetInnerHTML={{ __html: css }} />
-      <div className="card">
+  <div className="card" ref={cardRef}>
 
         {/* INTRO */}
         <div className={`stage ${stage==="intro"?"active":""}`}>
@@ -579,7 +602,6 @@ const makePlan = useCallback(() => {
           <div className="hud">
             <div>Block <b>{block}</b> / {CFG.BLOCKS}</div>
             <div>Trial <b>{trialInBlock}</b> / {CFG.TRIALS_PER_BLOCK}</div>
-            <div>Targets this block: <b>{targetsLeft}</b></div>
             <div className="row" style={{ gap: 8 }}>
               <span>Space:</span>
               <span className={`keylamp ${spaceFlash ? "on" : ""}`} />
@@ -620,6 +642,8 @@ const makePlan = useCallback(() => {
         </div>
 
       </div>
+      {/*here*/}
+      <div className="distractor-layer" ref={bgRef} />
     </div>
   );
 }

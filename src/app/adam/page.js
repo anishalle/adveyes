@@ -5,7 +5,7 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from "react"
 /** Card CPT (game-only) with distractors outside the letter zone */
 const CFG = {
   BLOCKS: 2,
-  TRIALS_PER_BLOCK: 10,      // shorter while iterating
+  TRIALS_PER_BLOCK: 30,      // shorter while iterating
   TARGET_RATE: 0.15,
   ISI_MS: 300,
   STIM_MS_START: 1000,
@@ -14,7 +14,7 @@ const CFG = {
   ADAPT_UP_MISS: 100,
   ADAPT_DOWN_AFTER_HITS: 3,
   ADAPT_DOWN_STEP: 50,
-  DISTRACTOR_PROBS: { none: 0.4, notification: 0.18, pseudo: 0.18, screen: 0.09, shape: 0.15 },
+  DISTRACTOR_PROBS: { none: 0.4, notification: 0.22, screen: 0.13, shape: 0.25 },
   DISTRACTOR_ONSET_MS: [120, 200],
   DISTRACTOR_DUR_MS: [1800, 2400], // longer duration for more realistic distractions
   // Notification content for realistic distractions
@@ -181,6 +181,11 @@ button:hover{ background:#2a2e35; }
   position:absolute;
   z-index:2;
   pointer-events:none;
+}
+
+/* Animated movement for shape distractors */
+.distractor.shape-distractor.moving {
+  transition: left 1.2s linear, top 1.2s linear;
 }
 
 /* Screen effect style distractor */
@@ -376,7 +381,9 @@ const makePlan = useCallback(() => {
   useEffect(()=>()=>{ timers.current.forEach(clearTimeout); if(rafRef.current) cancelAnimationFrame(rafRef.current); },[]);
 
   const clearTimers = useCallback(()=>{
-  timers.current.forEach(clearTimeout); timers.current = [];
+  // Clear both timeouts and intervals
+  timers.current.forEach(id => { try { clearTimeout(id); } catch {} try { clearInterval(id); } catch {} });
+  timers.current = [];
   if (rafRef.current) cancelAnimationFrame(rafRef.current); rafRef.current = null;
   // Remove all distractors from both layers
   arenaRef.current?.querySelectorAll(".distractor").forEach(n => n.remove());
@@ -560,8 +567,8 @@ const makePlan = useCallback(() => {
     const el = document.createElement("div");
     el.className = "distractor";
 
-    // Configure distractor based on type
-    let candidatePositions = [];
+  // Configure distractor based on type
+  let candidatePositions = [];
     switch(type) {
       case "notification": {
         el.className += " notification";
@@ -577,19 +584,7 @@ const makePlan = useCallback(() => {
         ];
         break;
       }
-      case "pseudo": {
-        el.className += " pseudo-target";
-        el.textContent = CFG.TARGET;
-        // Smaller pseudo-target size
-        const width = 180, height = 48;
-        candidatePositions = [
-          {x: W/4, y: hudRect.bottom + 12},
-          {x: W*3/4 - width, y: hudRect.bottom + 12},
-          {x: W/4, y: H - height - 50},
-          {x: W*3/4 - width, y: H - height - 50}
-        ];
-        break;
-      }
+      // ...other distractor cases remain unchanged...
       case "screen": {
         el.className += " screen-effect";
         el.style.opacity = "0.15";
@@ -610,6 +605,8 @@ const makePlan = useCallback(() => {
         el.style.background = "none";
         el.style.opacity = "0.85";
         el.style.pointerEvents = "none";
+        // record intrinsic size for placement checks
+        el._w = size; el._h = size;
         // SVG for shape
         let svg = "";
         if (shape === "circle") {
@@ -620,13 +617,47 @@ const makePlan = useCallback(() => {
           svg = `<svg width='${size}' height='${size}'><polygon points='${size/2},6 6,${size-6} ${size-6},${size-6}' fill='${color}' /></svg>`;
         }
         el.innerHTML = svg;
-        // Candidate positions: grid in safe area, avoid HUD
+        // Define safe bands (left of card, right of card, below card)
+        const bands = [];
+        const leftBand = { xMin: 20, xMax: Math.max(20, (cardRect.left - wrapRect.left) - 20 - size), yMin: hudRect.bottom + 12, yMax: H - size - 20 };
+        const rightBand = { xMin: Math.min(W - size - 20, (cardRect.right - wrapRect.left) + 20), xMax: W - size - 20, yMin: hudRect.bottom + 12, yMax: H - size - 20 };
+        const bottomBand = { xMin: 20, xMax: W - size - 20, yMin: (cardRect.bottom - wrapRect.top) + 20, yMax: H - size - 20 };
+        if (leftBand.xMax - leftBand.xMin > 20 && leftBand.yMax - leftBand.yMin > 20) bands.push(leftBand);
+        if (rightBand.xMax - rightBand.xMin > 20 && rightBand.yMax - rightBand.yMin > 20) bands.push(rightBand);
+        if (bottomBand.yMax - bottomBand.yMin > 20) bands.push(bottomBand);
+        // pick a band
+        el._band = bands.length ? pick(bands) : { xMin: 20, xMax: W - size - 20, yMin: hudRect.bottom + 12, yMax: H - size - 20 };
+        // Seed candidate positions within the chosen band
         candidatePositions = [];
-        for (let i = 0; i < 4; i++) {
-          let x = ri(20, W - size - 20);
-          let y = ri(hudRect.bottom + 12, H - size - 20);
+        for (let i = 0; i < 6; i++) {
+          let x = ri(el._band.xMin, el._band.xMax);
+          let y = ri(el._band.yMin, el._band.yMax);
           candidatePositions.push({x, y});
         }
+        // After placement, animate movement within the same band avoiding overlaps
+        el.classList.add('moving');
+        el._moveShape = () => {
+          let tries = 0;
+          const curX = parseFloat(el.style.left || '0');
+          const curY = parseFloat(el.style.top || '0');
+          while (tries++ < 24) {
+            const newX = ri(el._band.xMin, el._band.xMax);
+            const newY = ri(el._band.yMin, el._band.yMax);
+            // ensure a noticeable delta
+            if (Math.abs(newX - curX) < 10 && Math.abs(newY - curY) < 10) continue;
+            const rect = { left: newX, top: newY, right: newX + el._w, bottom: newY + el._h };
+            // recompute active rects excluding self
+            const others = Array.from(bgEl.querySelectorAll('.distractor')).filter(d => d !== el).map(d => {
+              const rr = d.getBoundingClientRect();
+              return { left: rr.left - wrapRect.left, top: rr.top - wrapRect.top, right: rr.right - wrapRect.left, bottom: rr.bottom - wrapRect.top };
+            });
+            if (forbiddenRects.some(f => overlaps(rect, f))) continue;
+            if (others.some(a => overlaps(rect, a))) continue;
+            el.style.left = `${newX}px`;
+            el.style.top = `${newY}px`;
+            break;
+          }
+        };
         break;
       }
     }
@@ -635,8 +666,8 @@ const makePlan = useCallback(() => {
     let placed = false;
     for (const pos of candidatePositions) {
       // Estimate distractor rect
-      const width = el.classList.contains('notification') ? 280 : (el.classList.contains('pseudo-target') ? 180 : W);
-      const height = el.classList.contains('notification') ? 80 : (el.classList.contains('pseudo-target') ? 80 : H);
+      const width = el._w || (el.classList.contains('notification') ? 280 : (type === 'screen' ? W : 0));
+      const height = el._h || (el.classList.contains('notification') ? 80 : (type === 'screen' ? H : 0));
       const rect = {left:pos.x,top:pos.y,right:pos.x+width,bottom:pos.y+height};
       // Check forbidden zones
       if (forbiddenRects.some(f => overlaps(rect, f))) continue;
@@ -655,6 +686,19 @@ const makePlan = useCallback(() => {
     // Animate in/out with proper timing
     const startTimer = window.setTimeout(() => {
       el.style.opacity = type === "screen" ? "0.15" : "1";
+      // If shape, animate movement every ~1.2s, 2-3 times
+      if (type === "shape") {
+        // Immediate first move so it's visible quickly
+        setTimeout(() => el._moveShape(), 60);
+        // Compute moves based on lifetime
+        const moveEvery = 900;
+        let moves = Math.max(2, Math.floor(durMs / moveEvery));
+        const moveInterval = setInterval(() => {
+          if (moves-- > 0) el._moveShape();
+          else clearInterval(moveInterval);
+        }, moveEvery);
+        timers.current.push(moveInterval);
+      }
       const endTimer = window.setTimeout(() => {
         el.style.opacity = "0";
         setTimeout(() => el.remove(), 300);

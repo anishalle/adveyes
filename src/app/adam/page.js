@@ -14,7 +14,7 @@ const CFG = {
   ADAPT_UP_MISS: 100,
   ADAPT_DOWN_AFTER_HITS: 3,
   ADAPT_DOWN_STEP: 50,
-  DISTRACTOR_PROBS: { none: 0.4, notification: 0.22, screen: 0.13, shape: 0.25 },
+  DISTRACTOR_PROBS: { none: 0.34, notification: 0.18, banner: 0.12, ripple: 0.1, screen: 0.1, shape: 0.16 },
   DISTRACTOR_ONSET_MS: [120, 200],
   DISTRACTOR_DUR_MS: [1800, 2400], // longer duration for more realistic distractions
   // Notification content for realistic distractions
@@ -185,7 +185,7 @@ button:hover{ background:#2a2e35; }
 
 /* Animated movement for shape distractors */
 .distractor.shape-distractor.moving {
-  transition: left 1.2s linear, top 1.2s linear;
+  transition: left 800ms cubic-bezier(0.4, 0, 0.2, 1), top 800ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Screen effect style distractor */
@@ -195,6 +195,35 @@ button:hover{ background:#2a2e35; }
   background:rgba(255,255,255,0.03);
   mix-blend-mode:difference;
   z-index:1;
+}
+
+/* Banner (sliding info) */
+.distractor.banner{
+  background:#1f2328;
+  color:#e8eaed;
+  border:1px solid #2b3036;
+  border-radius:10px;
+  padding:8px 12px;
+  box-shadow:0 6px 18px rgba(0,0,0,.25);
+  font-size:14px;
+  line-height:1.3;
+  opacity:0;
+}
+.distractor.banner.slide-in{ transition: transform 420ms cubic-bezier(0.4,0,0.2,1), opacity 300ms ease; }
+.distractor.banner.top{ transform: translateY(-10px); }
+.distractor.banner.bottom{ transform: translateY(10px); }
+.distractor.banner.show{ transform: translateY(0); opacity:1; }
+
+/* Ripple from edge */
+@keyframes rippleExpand {
+  from { transform: scale(0.6); opacity: .35; }
+  to   { transform: scale(1.8); opacity: 0; }
+}
+.distractor.ripple{
+  border-radius:50%;
+  background:#4b8cf5;
+  opacity:.25;
+  will-change: transform, opacity;
 }
 
 .distractor-layer{
@@ -293,17 +322,14 @@ const makePlan = useCallback(() => {
     }
   }
 
-  // 6) Weighted distractor type picker (use keys from CFG.DISTRACTOR_PROBS)
-  const levels = Object.keys(CFG.DISTRACTOR_PROBS);
-  const weights = levels.map(l => Number(CFG.DISTRACTOR_PROBS[l]) || 0);
-  const totalW = weights.reduce((a, b) => a + b, 0) || 1;
-  const weighted = () => {
-    let p = Math.random() * totalW, acc = 0;
-    for (let i = 0; i < levels.length; i++) {
-      acc += weights[i];
-      if (p <= acc) return levels[i];
-    }
-    return "none";
+  // 6) Random distractor picker: preserve overall rate (based on 'none'),
+  //    but choose uniformly among all distractor types when shown.
+  const allTypes = Object.keys(CFG.DISTRACTOR_PROBS).filter(t => t !== 'none');
+  const noneRate = Math.max(0, Math.min(1, Number(CFG.DISTRACTOR_PROBS?.none ?? 0.34)));
+  const randomType = () => {
+    const show = Math.random() > noneRate; // show with probability 1 - noneRate
+    if (!show || allTypes.length === 0) return 'none';
+    return allTypes[Math.floor(Math.random() * allTypes.length)];
   };
 
   // 7) Build the block plan
@@ -317,7 +343,7 @@ const makePlan = useCallback(() => {
       do { L = LETTERS[Math.floor(Math.random() * LETTERS.length)]; }
       while (L === CFG.TARGET);
     }
-    plan.push({ letter: L, isTarget: isT, distractorLevel: weighted() });
+    plan.push({ letter: L, isTarget: isT, distractorLevel: randomType() });
   }
   return plan;
 }, []);
@@ -576,12 +602,40 @@ const makePlan = useCallback(() => {
         el.innerHTML = `<div style='font-weight:600;margin-bottom:4px'>${notif.title}</div>${notif.body}`;
         // Notification size
         const width = 280, height = 80;
-        candidatePositions = [
-          {x: 20, y: 20},
-          {x: W - width - 20, y: 20},
-          {x: 20, y: H - height - 20},
-          {x: W - width - 20, y: H - height - 20}
-        ];
+        // Build safe lobes (top, bottom, left, right) excluding card+HUD
+        const forbid = {
+          left: clamp(cardRect.left - wrapRect.left, 0, W),
+          top: clamp(cardRect.top - wrapRect.top, 0, H),
+          right: clamp(cardRect.right - wrapRect.left, 0, W),
+          bottom: clamp(cardRect.bottom - wrapRect.top, 0, H),
+        };
+        const margin = 20;
+        const lobes = [];
+        // top lobe
+        if (forbid.top - height - margin > margin)
+          lobes.push({ xMin: margin, xMax: W - width - margin, yMin: margin, yMax: forbid.top - height - margin });
+        // bottom lobe
+        if (H - forbid.bottom - height - margin > margin)
+          lobes.push({ xMin: margin, xMax: W - width - margin, yMin: forbid.bottom + margin, yMax: H - height - margin });
+        // left lobe
+        if (forbid.left - width - margin > margin) {
+          const yMin = Math.min(Math.max(margin, hudRect.bottom + margin), H - height - margin);
+          lobes.push({ xMin: margin, xMax: forbid.left - width - margin, yMin, yMax: H - height - margin });
+        }
+        // right lobe
+        if (W - forbid.right - width - margin > margin) {
+          const yMin = Math.min(Math.max(margin, hudRect.bottom + margin), H - height - margin);
+          lobes.push({ xMin: forbid.right + margin, xMax: W - width - margin, yMin, yMax: H - height - margin });
+        }
+        // sample random positions across lobes
+        candidatePositions = [];
+        for (let i = 0; i < 8; i++) {
+          const R = pick(lobes);
+          if (!R) break;
+          const x = ri(R.xMin, Math.max(R.xMin, R.xMax));
+          const y = ri(R.yMin, Math.max(R.yMin, R.yMax));
+          candidatePositions.push({ x, y });
+        }
         break;
       }
       // ...other distractor cases remain unchanged...
@@ -589,6 +643,74 @@ const makePlan = useCallback(() => {
         el.className += " screen-effect";
         el.style.opacity = "0.15";
         candidatePositions = [{x:0,y:0}]; // Only one position, covers whole screen
+        break;
+      }
+      case "banner": {
+        el.className += " banner";
+        el.textContent = pick([
+          "Sync paused. Click to resume...",
+          "Settings saved.",
+          "Background task completed.",
+          "Network restored",
+        ]);
+        // Size assumptions
+        const width = 320, height = 42;
+        el._w = width; el._h = height;
+        // Safe lobes for banner (top below HUD, or bottom above bottom edge), across width avoiding card
+        const margin = 16;
+        const topBand = { xMin: margin, xMax: W - width - margin, y: Math.max(hudRect.bottom + margin, margin) };
+        const bottomBand = { xMin: margin, xMax: W - width - margin, y: H - height - margin };
+        const bands = [];
+        if (topBand.xMax > topBand.xMin) bands.push({ ...topBand, pos: 'top' });
+        if (bottomBand.xMax > bottomBand.xMin) bands.push({ ...bottomBand, pos: 'bottom' });
+        const b = bands.length ? pick(bands) : bottomBand;
+        el.classList.add('slide-in');
+        el.classList.add(b.pos);
+        candidatePositions = [];
+        for (let i = 0; i < 6; i++) {
+          const x = ri(b.xMin, b.xMax);
+          candidatePositions.push({ x, y: b.y });
+        }
+        break;
+      }
+      case "ripple": {
+        el.className += " ripple";
+        const size = ri(32, 56);
+        el.style.width = `${size}px`;
+        el.style.height = `${size}px`;
+        el._w = size; el._h = size;
+        // Place near an edge lobe and animate via CSS keyframes
+        const margin = 16;
+        const forbid = {
+          left: clamp(cardRect.left - wrapRect.left, 0, W),
+          top: clamp(cardRect.top - wrapRect.top, 0, H),
+          right: clamp(cardRect.right - wrapRect.left, 0, W),
+          bottom: clamp(cardRect.bottom - wrapRect.top, 0, H),
+        };
+        const lobes = [];
+        // top
+        if (forbid.top - size - margin > margin)
+          lobes.push({ xMin: margin, xMax: W - size - margin, yMin: margin, yMax: forbid.top - size - margin });
+        // bottom
+        if (H - forbid.bottom - size - margin > margin)
+          lobes.push({ xMin: margin, xMax: W - size - margin, yMin: forbid.bottom + margin, yMax: H - size - margin });
+        // left
+        if (forbid.left - size - margin > margin) {
+          const yMin = Math.min(Math.max(margin, hudRect.bottom + margin), H - size - margin);
+          lobes.push({ xMin: margin, xMax: forbid.left - size - margin, yMin, yMax: H - size - margin });
+        }
+        // right
+        if (W - forbid.right - size - margin > margin) {
+          const yMin = Math.min(Math.max(margin, hudRect.bottom + margin), H - size - margin);
+          lobes.push({ xMin: forbid.right + margin, xMax: W - size - margin, yMin, yMax: H - size - margin });
+        }
+        candidatePositions = [];
+        for (let i = 0; i < 6; i++) {
+          const R = pick(lobes); if (!R) break;
+          const x = ri(R.xMin, Math.max(R.xMin, R.xMax));
+          const y = ri(R.yMin, Math.max(R.yMin, R.yMax));
+          candidatePositions.push({ x, y });
+        }
         break;
       }
       case "shape": {
@@ -617,14 +739,16 @@ const makePlan = useCallback(() => {
           svg = `<svg width='${size}' height='${size}'><polygon points='${size/2},6 6,${size-6} ${size-6},${size-6}' fill='${color}' /></svg>`;
         }
         el.innerHTML = svg;
-        // Define safe bands (left of card, right of card, below card)
-        const bands = [];
-        const leftBand = { xMin: 20, xMax: Math.max(20, (cardRect.left - wrapRect.left) - 20 - size), yMin: hudRect.bottom + 12, yMax: H - size - 20 };
-        const rightBand = { xMin: Math.min(W - size - 20, (cardRect.right - wrapRect.left) + 20), xMax: W - size - 20, yMin: hudRect.bottom + 12, yMax: H - size - 20 };
-        const bottomBand = { xMin: 20, xMax: W - size - 20, yMin: (cardRect.bottom - wrapRect.top) + 20, yMax: H - size - 20 };
+  // Define safe bands (left, right, top, bottom of card)
+  const bands = [];
+  const leftBand = { xMin: 20, xMax: Math.max(20, (cardRect.left - wrapRect.left) - 20 - size), yMin: hudRect.bottom + 12, yMax: H - size - 20 };
+  const rightBand = { xMin: Math.min(W - size - 20, (cardRect.right - wrapRect.left) + 20), xMax: W - size - 20, yMin: hudRect.bottom + 12, yMax: H - size - 20 };
+  const topBand = { xMin: 20, xMax: W - size - 20, yMin: 20, yMax: Math.max(20, (cardRect.top - wrapRect.top) - size - 20) };
+  const bottomBand = { xMin: 20, xMax: W - size - 20, yMin: (cardRect.bottom - wrapRect.top) + 20, yMax: H - size - 20 };
         if (leftBand.xMax - leftBand.xMin > 20 && leftBand.yMax - leftBand.yMin > 20) bands.push(leftBand);
         if (rightBand.xMax - rightBand.xMin > 20 && rightBand.yMax - rightBand.yMin > 20) bands.push(rightBand);
-        if (bottomBand.yMax - bottomBand.yMin > 20) bands.push(bottomBand);
+  if (topBand.yMax - topBand.yMin > 20) bands.push(topBand);
+  if (bottomBand.yMax - bottomBand.yMin > 20) bands.push(bottomBand);
         // pick a band
         el._band = bands.length ? pick(bands) : { xMin: 20, xMax: W - size - 20, yMin: hudRect.bottom + 12, yMax: H - size - 20 };
         // Seed candidate positions within the chosen band
@@ -644,7 +768,7 @@ const makePlan = useCallback(() => {
             const newX = ri(el._band.xMin, el._band.xMax);
             const newY = ri(el._band.yMin, el._band.yMax);
             // ensure a noticeable delta
-            if (Math.abs(newX - curX) < 10 && Math.abs(newY - curY) < 10) continue;
+            if (Math.abs(newX - curX) < 16 && Math.abs(newY - curY) < 16) continue;
             const rect = { left: newX, top: newY, right: newX + el._w, bottom: newY + el._h };
             // recompute active rects excluding self
             const others = Array.from(bgEl.querySelectorAll('.distractor')).filter(d => d !== el).map(d => {
@@ -653,6 +777,12 @@ const makePlan = useCallback(() => {
             });
             if (forbiddenRects.some(f => overlaps(rect, f))) continue;
             if (others.some(a => overlaps(rect, a))) continue;
+            // vary transition duration based on distance for natural flow
+            const dx = Math.abs(newX - curX);
+            const dy = Math.abs(newY - curY);
+            const dist = Math.hypot(dx, dy);
+            const ms = Math.round(400 + Math.min(1200, dist * 6)); // 0.4s to ~1.6s
+            el.style.transitionDuration = `${ms}ms, ${ms}ms`;
             el.style.left = `${newX}px`;
             el.style.top = `${newY}px`;
             break;
@@ -664,6 +794,8 @@ const makePlan = useCallback(() => {
 
     // Try to find a non-overlapping position
     let placed = false;
+    let chosenPos = null;
+    let chosenQuadrant = null;
     for (const pos of candidatePositions) {
       // Estimate distractor rect
       const width = el._w || (el.classList.contains('notification') ? 280 : (type === 'screen' ? W : 0));
@@ -676,6 +808,17 @@ const makePlan = useCallback(() => {
       // Place here
       el.style.left = `${pos.x}px`;
       el.style.top = `${pos.y}px`;
+      chosenPos = { x: pos.x, y: pos.y };
+      // Compute a coarse quadrant relative to the card rect in wrap coordinates
+      const cxL = cardRect.left - wrapRect.left;
+      const cxR = cardRect.right - wrapRect.left;
+      const cyT = cardRect.top - wrapRect.top;
+      const cyB = cardRect.bottom - wrapRect.top;
+      if (rect.bottom <= cyT) chosenQuadrant = 'top';
+      else if (rect.top >= cyB) chosenQuadrant = 'bottom';
+      else if (rect.right <= cxL) chosenQuadrant = 'left';
+      else if (rect.left >= cxR) chosenQuadrant = 'right';
+      else chosenQuadrant = 'around';
       placed = true;
       break;
     }
@@ -686,18 +829,26 @@ const makePlan = useCallback(() => {
     // Animate in/out with proper timing
     const startTimer = window.setTimeout(() => {
       el.style.opacity = type === "screen" ? "0.15" : "1";
+      if (type === 'banner') {
+        requestAnimationFrame(() => { el.classList.add('show'); });
+      }
+      if (type === 'ripple') {
+        el.style.animation = `rippleExpand ${Math.max(600, Math.min(1400, durMs - 300))}ms ease-out forwards`;
+      }
       // If shape, animate movement every ~1.2s, 2-3 times
       if (type === "shape") {
-        // Immediate first move so it's visible quickly
-        setTimeout(() => el._moveShape(), 60);
-        // Compute moves based on lifetime
-        const moveEvery = 900;
-        let moves = Math.max(2, Math.floor(durMs / moveEvery));
-        const moveInterval = setInterval(() => {
-          if (moves-- > 0) el._moveShape();
-          else clearInterval(moveInterval);
-        }, moveEvery);
-        timers.current.push(moveInterval);
+        // Recursive scheduler for natural cadence with random pauses
+        const tEnd = performance.now() + durMs - 200; // stop a bit early for fade
+        const scheduleMove = () => {
+          if (performance.now() > tEnd) return;
+          el._moveShape();
+          const pause = ri(500, 1200); // random pause between moves
+          const id = window.setTimeout(scheduleMove, pause);
+          timers.current.push(id);
+        };
+        // Kick off soon after appear
+        const firstId = window.setTimeout(scheduleMove, 80);
+        timers.current.push(firstId);
       }
       const endTimer = window.setTimeout(() => {
         el.style.opacity = "0";
@@ -706,7 +857,7 @@ const makePlan = useCallback(() => {
       timers.current.push(endTimer);
     }, onsetMs);
     timers.current.push(startTimer);
-    return { type: type };
+    return { type: type, onset: onsetMs, duration: durMs, x: chosenPos?.x ?? null, y: chosenPos?.y ?? null, quadrant: chosenQuadrant };
   };
 
   const downloadCSV = ()=>{

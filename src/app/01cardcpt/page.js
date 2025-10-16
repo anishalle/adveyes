@@ -5,16 +5,16 @@ import Image from "next/image";
 
 /** Card CPT (game-only) with distractors outside the letter zone */
 const CFG = {
-  BLOCKS: 2,
-  TRIALS_PER_BLOCK: 10,      // shorter while iterating
+  BLOCKS: 4,
+  TRIALS_PER_BLOCK: 20,      // shorter while iterating
   TARGET_RATE: 0.15,
-  ISI_MS: 300,
-  STIM_MS_START: 1000,
+  ISI_MS: 800,
+  STIM_MS_START: 4000,
   STIM_MS_MIN: 600,
-  STIM_MS_MAX: 2000,
-  ADAPT_UP_MISS: 100,
+  STIM_MS_MAX: 10000,
+  ADAPT_UP_MISS: 500,
   ADAPT_DOWN_AFTER_HITS: 3,
-  ADAPT_DOWN_STEP: 50,
+  ADAPT_DOWN_STEP: 120,
   DISTRACTOR_PROBS: { none: 0.5, notification: 0.2, pseudo: 0.2, screen: 0.1 },
   DISTRACTOR_ONSET_MS: [120, 200],
   DISTRACTOR_DUR_MS: [1800, 2400], // longer duration for more realistic distractions
@@ -32,6 +32,7 @@ const CFG = {
   TARGET: '7 of diamonds',
   RESPONSE_KEYS: ["Space", "Spacebar", " "],
 };
+
 
 const css = `
 :root { --bg:#0e0e10; --fg:#f7f8fb; --muted:#9aa0a6; }
@@ -640,6 +641,9 @@ const makePlan = useCallback(() => {
         <div className={`stage ${stage==="intro"?"active":""}`}>
           <h1>Card CPT (Game)</h1>
           <p>Press <b>SPACE</b> when you see the card <b>{CFG.TARGET}</b>. Don’t press for any other card.</p>
+            <div className="flex justify-center items-center">
+              <Image src={CFG.LETTERSARRAY[CFG.LETTERS.indexOf(CFG.TARGET)]} alt={CFG.TARGET} width={200} height={200} />
+            </div>
           <div className="row">
             <button onClick={startTask}>Start</button>
             <button onClick={()=>document.documentElement.requestFullscreen?.()}>Fullscreen</button>

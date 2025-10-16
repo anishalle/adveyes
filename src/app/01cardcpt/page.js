@@ -14,10 +14,20 @@ const CFG = {
   ADAPT_UP_MISS: 100,
   ADAPT_DOWN_AFTER_HITS: 3,
   ADAPT_DOWN_STEP: 50,
-  DISTRACTOR_PROBS: { none: 0.5, low: 0.25, high: 0.25 },
+  DISTRACTOR_PROBS: { none: 0.5, notification: 0.2, pseudo: 0.2, screen: 0.1 },
   DISTRACTOR_ONSET_MS: [120, 200],
-  DISTRACTOR_DUR_MS: [180, 300],
-  LETTERS: "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+  DISTRACTOR_DUR_MS: [1800, 2400], // longer duration for more realistic distractions
+  // Notification content for realistic distractions
+  NOTIFICATION_CONTENT: [
+    { title: "New Message", body: "Sarah: Hey, are you free to chat?" },
+    { title: "Calendar", body: "Meeting 'Weekly Sync' starts in 15 minutes" },
+    { title: "Updates Available", body: "System updates are ready to install" },
+    { title: "Weather", body: "Light rain expected in your area" },
+    { title: "Battery Low", body: "20% battery remaining" }
+  ],
+  // 52-card deck, pipe-separated for easy splitting elsewhere
+  LETTERS: "Ace of Hearts|2 of Hearts|3 of Hearts|4 of Hearts|5 of Hearts|6 of Hearts|7 of Hearts|8 of Hearts|9 of Hearts|10 of Hearts|Jack of Hearts|Queen of Hearts|King of Hearts|Ace of Diamonds|2 of Diamonds|3 of Diamonds|4 of Diamonds|5 of Diamonds|6 of Diamonds|7 of Diamonds|8 of Diamonds|9 of Diamonds|10 of Diamonds|Jack of Diamonds|Queen of Diamonds|King of Diamonds|Ace of Clubs|2 of Clubs|3 of Clubs|4 of Clubs|5 of Clubs|6 of Clubs|7 of Clubs|8 of Clubs|9 of Clubs|10 of Clubs|Jack of Clubs|Queen of Clubs|King of Clubs|Ace of Spades|2 of Spades|3 of Spades|4 of Spades|5 of Spades|6 of Spades|7 of Spades|8 of Spades|9 of Spades|10 of Spades|Jack of Spades|Queen of Spades|King of Spades",
+  TARGET: "Ace of Hearts",
   RESPONSE_KEYS: ["Space", "Spacebar", " "],
 };
 
@@ -131,14 +141,40 @@ button:hover{ background:#2a2e35; }
 }
 
 /* Flashes live *inside* the arena only */
-.edge{
+.distractor{
   position:absolute !important;
-  background:#c7d2fe;
-  opacity:.55;
-  border-radius:6px;
-  will-change:opacity,transform;
   pointer-events:none;
-  z-index:2; /* sits below the card so flashes are visible outside the arena */
+  z-index:2;
+  opacity:0;
+  transition:opacity 0.3s ease;
+}
+
+/* Notification style distractor */
+.distractor.notification {
+  background:#fff;
+  border-radius:8px;
+  padding:12px 16px;
+  box-shadow:0 4px 12px rgba(0,0,0,0.15);
+  width:280px;
+  color:#000;
+  font-size:14px;
+  line-height:1.4;
+}
+
+/* Pseudo-target style distractor */
+.distractor.pseudo-target {
+  font-weight:800;
+  font-size:clamp(56px,12.5vw,120px);
+  color:rgba(247,248,251,0.4);
+}
+
+/* Screen effect style distractor */
+.distractor.screen-effect {
+  position:fixed;
+  inset:0;
+  background:rgba(255,255,255,0.03);
+  mix-blend-mode:difference;
+  z-index:1;
 }
 
 .distractor-layer{
@@ -237,13 +273,9 @@ const makePlan = useCallback(() => {
     }
   }
 
-  // 6) Weighted distractor level picker
-  const levels = ["none", "low", "high"];
-  const weights = [
-    Number(CFG.DISTRACTOR_PROBS.none) || 0,
-    Number(CFG.DISTRACTOR_PROBS.low) || 0,
-    Number(CFG.DISTRACTOR_PROBS.high) || 0,
-  ];
+  // 6) Weighted distractor type picker (use keys from CFG.DISTRACTOR_PROBS)
+  const levels = Object.keys(CFG.DISTRACTOR_PROBS);
+  const weights = levels.map(l => Number(CFG.DISTRACTOR_PROBS[l]) || 0);
   const totalW = weights.reduce((a, b) => a + b, 0) || 1;
   const weighted = () => {
     let p = Math.random() * totalW, acc = 0;
@@ -256,14 +288,14 @@ const makePlan = useCallback(() => {
 
   // 7) Build the block plan
   const plan = [];
-  const LETTERS = CFG.LETTERS.split("");
+  const LETTERS = CFG.LETTERS.split("|");
   for (let i = 0; i < n; i++) {
     const isT = seq[i] ? 1 : 0;
-    let L = "X";
+    let L = CFG.TARGET;
     if (!isT) {
-      // pick any non-X letter
+      // pick any non-target card
       do { L = LETTERS[Math.floor(Math.random() * LETTERS.length)]; }
-      while (L === "X");
+      while (L === CFG.TARGET);
     }
     plan.push({ letter: L, isTarget: isT, distractorLevel: weighted() });
   }
@@ -329,11 +361,11 @@ const makePlan = useCallback(() => {
   useEffect(()=>()=>{ timers.current.forEach(clearTimeout); if(rafRef.current) cancelAnimationFrame(rafRef.current); },[]);
 
   const clearTimers = useCallback(()=>{
-    timers.current.forEach(clearTimeout); timers.current = [];
-    if (rafRef.current) cancelAnimationFrame(rafRef.current); rafRef.current = null;
-    // scoped cleanup of distractors in either layer
-    arenaRef.current?.querySelectorAll(".edge").forEach(n => n.remove());
-    bgRef.current?.querySelectorAll(".edge").forEach(n => n.remove());
+  timers.current.forEach(clearTimeout); timers.current = [];
+  if (rafRef.current) cancelAnimationFrame(rafRef.current); rafRef.current = null;
+  // Remove all distractors from both layers
+  arenaRef.current?.querySelectorAll(".distractor").forEach(n => n.remove());
+  bgRef.current?.querySelectorAll(".distractor").forEach(n => n.remove());
   },[]);
 
   const startTask = ()=>{
@@ -392,8 +424,9 @@ const makePlan = useCallback(() => {
     let dParams = null;
     if (plan.distractorLevel !== "none") {
       const onset = Math.round(r(...CFG.DISTRACTOR_ONSET_MS));
-      const dur   = Math.round(r(...CFG.DISTRACTOR_DUR_MS));
-      dParams = spawnEdgeFlash(plan.distractorLevel, onset, dur);
+  // Randomize distractor duration between 1500ms and 3500ms
+  const dur = Math.round(r(1500, 3500));
+      dParams = spawnDistractor(plan.distractorLevel, onset, dur);
     }
 
     const endT = window.setTimeout(()=> finishTrial(plan, dParams), stimMs);
@@ -454,118 +487,134 @@ const makePlan = useCallback(() => {
     else nextTrial();
   };
 
-  // Distractor: inside .arena ONLY, NEVER overlapping the *actual* letter glyph (+ moat)
-  const spawnEdgeFlash = (level, onsetMs, durMs) => {
-    const arenaEl  = arenaRef.current;
-    const letterEl = letterRef.current;
+  // Realistic distractors: notification popups, pseudo targets, screen color changes
+  // Distractor placement with overlap avoidance
+  const spawnDistractor = (type, onsetMs, durMs) => {
+    const arenaEl = arenaRef.current;
     const bgEl = bgRef.current || wrapRef.current;
-    if (!arenaEl || !bgEl) return null;
+    const cardEl = cardRef.current;
+    if (!arenaEl || !bgEl || !cardEl) return null;
 
-    const aRect = arenaEl.getBoundingClientRect();
     const wrapRect = bgEl.getBoundingClientRect();
+    const cardRect = cardEl.getBoundingClientRect();
     const W = wrapRect.width;
     const H = wrapRect.height;
 
-    // Forbidden: prefer the whole card rect (includes HUD). fallback to arena/letter if card not ready.
-    const PAD = 18;
-    let forbid = null;
-    const cardEl = cardRef.current;
-    if (cardEl) {
-      const cRect = cardEl.getBoundingClientRect();
-      forbid = {
-        left:   clamp(cRect.left - wrapRect.left - PAD, 0, W),
-        top:    clamp(cRect.top  - wrapRect.top  - PAD, 0, H),
-        right:  clamp(cRect.right - wrapRect.left + PAD, 0, W),
-        bottom: clamp(cRect.bottom - wrapRect.top + PAD, 0, H),
+    // HUD area (top of card)
+    // Find .hud inside .card, not bgEl
+    let hudRect = {left:0,top:0,right:0,bottom:0};
+    const cardHudEl = cardEl.querySelector('.hud');
+    if (cardHudEl) {
+      const r = cardHudEl.getBoundingClientRect();
+      hudRect = {
+        left: r.left - wrapRect.left,
+        top: r.top - wrapRect.top,
+        right: r.right - wrapRect.left,
+        bottom: r.bottom - wrapRect.top
       };
-    } else {
-      // fallback to arena/letter based forbid area
-      forbid = {
-        left: aRect.left + aRect.width * 0.34 - wrapRect.left,
-        top:  aRect.top  + aRect.height * 0.34 - wrapRect.top,
-        right: aRect.left + aRect.width * 0.66 - wrapRect.left,
-        bottom: aRect.top + aRect.height * 0.66 - wrapRect.top,
+    }
+
+    // Forbidden zones: card + HUD
+    const PAD = 20;
+    const forbiddenRects = [
+      {
+        left: clamp(cardRect.left - wrapRect.left - PAD, 0, W),
+        top: clamp(cardRect.top - wrapRect.top - PAD, 0, H),
+        right: clamp(cardRect.right - wrapRect.left + PAD, 0, W),
+        bottom: clamp(cardRect.bottom - wrapRect.top + PAD, 0, H)
+      },
+      hudRect
+    ];
+
+    // Track active distractors to avoid overlap
+    const activeRects = Array.from(bgEl.querySelectorAll('.distractor')).map(d => {
+      const r = d.getBoundingClientRect();
+      return {
+        left: r.left - wrapRect.left,
+        top: r.top - wrapRect.top,
+        right: r.right - wrapRect.left,
+        bottom: r.bottom - wrapRect.top
       };
-      if (letterEl) {
-        const lRect = letterEl.getBoundingClientRect();
-        const lLeft   = lRect.left   - wrapRect.left;
-        const lTop    = lRect.top    - wrapRect.top;
-        const lRight  = lRect.right  - wrapRect.left;
-        const lBottom = lRect.bottom - wrapRect.top;
-        forbid = {
-          left:   clamp(lLeft   - PAD, 0, W),
-          top:    clamp(lTop    - PAD, 0, H),
-          right:  clamp(lRight  + PAD, 0, W),
-          bottom: clamp(lBottom + PAD, 0, H),
-        };
+    });
+
+    // Helper: check overlap
+    function overlaps(r1, r2) {
+      return !(r1.right < r2.left || r1.left > r2.right || r1.bottom < r2.top || r1.top > r2.bottom);
+    }
+
+    const el = document.createElement("div");
+    el.className = "distractor";
+
+    // Configure distractor based on type
+    let candidatePositions = [];
+    switch(type) {
+      case "notification": {
+        el.className += " notification";
+        const notif = pick(CFG.NOTIFICATION_CONTENT);
+        el.innerHTML = `<div style='font-weight:600;margin-bottom:4px'>${notif.title}</div>${notif.body}`;
+        // Notification size
+        const width = 280, height = 80;
+        candidatePositions = [
+          {x: 20, y: 20},
+          {x: W - width - 20, y: 20},
+          {x: 20, y: H - height - 20},
+          {x: W - width - 20, y: H - height - 20}
+        ];
+        break;
+      }
+      case "pseudo": {
+        el.className += " pseudo-target";
+        el.textContent = CFG.TARGET;
+        // Pseudo-target size
+        const width = 180, height = 80;
+        candidatePositions = [
+          {x: W/4, y: 50},
+          {x: W*3/4 - width, y: 50},
+          {x: W/4, y: H - height - 50},
+          {x: W*3/4 - width, y: H - height - 50}
+        ];
+        break;
+      }
+      case "screen": {
+        el.className += " screen-effect";
+        el.style.opacity = "0.15";
+        candidatePositions = [{x:0,y:0}]; // Only one position, covers whole screen
+        break;
       }
     }
 
-    // Element size/orientation (use arena dimensions for length scaling)
-    const isH = Math.random() < 0.5;
-    const aW = arenaEl.clientWidth;
-    const aH = arenaEl.clientHeight;
-    const thickness = level === "low" ? 8 : 16;
-    const lenFrac   = level === "low" ? (0.20 + Math.random()*0.20) : (0.32 + Math.random()*0.26);
-    const length    = Math.round((isH ? aW : aH) * lenFrac);
-
-    const el = document.createElement("div");
-    el.className = "edge";
-    el.style.position = "absolute";
-    el.style.opacity  = String(level === "low" ? 0.45 : 0.75);
-    if (isH) { el.style.width = `${length}px`; el.style.height = `${thickness}px`; }
-    else     { el.style.width = `${thickness}px`; el.style.height = `${length}px`; }
-    const elW = parseFloat(el.style.width);
-    const elH = parseFloat(el.style.height);
-
-    // Overlap test (touching counts as overlap)
-    const overlaps = (x0, y0) => {
-      const rL = x0, rR = x0 + elW, rT = y0, rB = y0 + elH;
-      return !(rR < forbid.left || rL > forbid.right || rB < forbid.top || rT > forbid.bottom);
-    };
-
-    // Four “lobe” regions outside the forbidden rect (in wrap/bg coords)
-    const regions = [];
-    if (forbid.top - elH > 0)                                             regions.push({ xMin: 0, xMax: W - elW, yMin: 0, yMax: forbid.top - elH });
-    if (H - forbid.bottom - elH > 0)                                      regions.push({ xMin: 0, xMax: W - elW, yMin: forbid.bottom, yMax: H - elH });
-    if (forbid.left - elW > 0 && (forbid.bottom - forbid.top - elH) > 0)  regions.push({ xMin: 0, xMax: forbid.left - elW, yMin: forbid.top, yMax: forbid.bottom - elH });
-    if (W - forbid.right - elW > 0 && (forbid.bottom - forbid.top - elH) > 0) regions.push({ xMin: forbid.right, xMax: W - elW, yMin: forbid.top, yMax: forbid.bottom - elH });
-
-    if (!regions.length) return null;
-
-    // Sample a point inside a random lobe
-    const R = regions[Math.floor(Math.random()*regions.length)];
-    let x = Math.round(R.xMin + Math.random() * Math.max(0, R.xMax - R.xMin));
-    let y = Math.round(R.yMin + Math.random() * Math.max(0, R.yMax - R.yMin));
-    let tries = 0;
-    while (overlaps(x, y) && tries++ < 50) {
-      x = Math.round(R.xMin + Math.random() * Math.max(0, R.xMax - R.xMin));
-      y = Math.round(R.yMin + Math.random() * Math.max(0, R.yMax - R.yMin));
+    // Try to find a non-overlapping position
+    let placed = false;
+    for (const pos of candidatePositions) {
+      // Estimate distractor rect
+      const width = el.classList.contains('notification') ? 280 : (el.classList.contains('pseudo-target') ? 180 : W);
+      const height = el.classList.contains('notification') ? 80 : (el.classList.contains('pseudo-target') ? 80 : H);
+      const rect = {left:pos.x,top:pos.y,right:pos.x+width,bottom:pos.y+height};
+      // Check forbidden zones
+      if (forbiddenRects.some(f => overlaps(rect, f))) continue;
+      // Check active distractors
+      if (activeRects.some(a => overlaps(rect, a))) continue;
+      // Place here
+      el.style.left = `${pos.x}px`;
+      el.style.top = `${pos.y}px`;
+      placed = true;
+      break;
     }
-    if (overlaps(x, y)) return null;
+    if (!placed) return null;
 
-    // Place inside bg layer (wrap coords)
-    el.style.left = `${x}px`;
-    el.style.top  = `${y}px`;
     bgEl.appendChild(el);
 
-    // Animate & cleanup
+    // Animate in/out with proper timing
     const startTimer = window.setTimeout(() => {
-      const t0 = performance.now();
-      const D = Math.round(durMs);
-      const startA = parseFloat(el.style.opacity);
-      const step = (now) => {
-        const p = Math.min((now - t0) / D, 1);
-        const op = 0.1 + (1 - Math.abs(0.5 - p) * 2) * (startA - 0.1);
-        el.style.opacity = String(op);
-        if (p < 1) requestAnimationFrame(step);
-        else el.remove();
-      };
-      requestAnimationFrame(step);
-    }, Math.round(onsetMs));
+      el.style.opacity = type === "screen" ? "0.15" : "1";
+      const endTimer = window.setTimeout(() => {
+        el.style.opacity = "0";
+        setTimeout(() => el.remove(), 300);
+      }, durMs);
+      timers.current.push(endTimer);
+    }, onsetMs);
     timers.current.push(startTimer);
-
-    return { type:"bg-flash", x, y };
+    return { type: type };
   };
 
   const downloadCSV = ()=>{
@@ -590,7 +639,7 @@ const makePlan = useCallback(() => {
         {/* INTRO */}
         <div className={`stage ${stage==="intro"?"active":""}`}>
           <h1>Card CPT (Game)</h1>
-          <p>Press <b>SPACE</b> when you see the letter <b>X</b>. Don’t press for any other letter.</p>
+          <p>Press <b>SPACE</b> when you see the card <b>{CFG.TARGET}</b>. Don’t press for any other card.</p>
           <div className="row">
             <button onClick={startTask}>Start</button>
             <button onClick={()=>document.documentElement.requestFullscreen?.()}>Fullscreen</button>

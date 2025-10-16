@@ -98,6 +98,8 @@ export default function MathNumberSense() {
   const [problems, setProblems] = useState(() => generateProblemSet(7))
   const [currentProblemIndex, setCurrentProblemIndex] = useState(0)
   const [testStarted, setTestStarted] = useState(false)
+  const [answers, setAnswers] = useState(() => Array(problems.length).fill(null))
+  const [hoveredAnswer, setHoveredAnswer] = useState(null)
   const [recordingTime, setRecordingTime] = useState(0)
   const [testCompleted, setTestCompleted] = useState(false)
   const [uploadSuccess, setUploadSuccess] = useState(false)
@@ -181,9 +183,17 @@ export default function MathNumberSense() {
     if (mediaRecorderRef.current && testStarted) {
       mediaRecorderRef.current.stop();
     }
-  }
+    audioChunksRef.current = [];
+
+  };
 
   const goToNextProblem = () => {
+    // require an answer before advancing
+    if (!answers[currentProblemIndex]) {
+      alert('Please indicate whether the product is larger or smaller before continuing.')
+      return
+    }
+
     if (currentProblemIndex < problems.length - 1) {
       const currentTime = Date.now() - testStartTimeRef.current;
       const newIndex = currentProblemIndex + 1;
@@ -199,6 +209,23 @@ export default function MathNumberSense() {
     } else {
       stopTest();
     }
+  }
+
+  const handleAnswer = (choice) => {
+    const now = Date.now()
+    const rel = testStartTimeRef.current ? now - testStartTimeRef.current : 0
+    const p = problems[currentProblemIndex]
+    const correct = choice === 'larger' ? (p.product > p.comparisonNumber) : (p.product < p.comparisonNumber)
+    setAnswers(prev => {
+      const copy = [...prev]
+      copy[currentProblemIndex] = {
+        answer: choice,
+        unixTime: now,
+        timeSinceStartMs: rel,
+        correct: !!correct
+      }
+      return copy
+    })
   }
 
   const audioBufferToWav = (audioBuffer) => {
@@ -326,6 +353,13 @@ export default function MathNumberSense() {
         URL.revokeObjectURL(markersUrl);
       }, 100);
 
+      // Also download CSV automatically along with audio and markers
+      try {
+        downloadCSV()
+      } catch (err) {
+        console.error('Error auto-downloading CSV:', err)
+      }
+
       setUploadSuccess(true);
     } catch (error) {
       console.error('Error downloading:', error);
@@ -334,6 +368,44 @@ export default function MathNumberSense() {
       setUploading(false);
     }
   };
+
+  // Generate CSV of answers and provide as a download
+  const downloadCSV = () => {
+    if (!answers || answers.length === 0) {
+      alert('No answers recorded')
+      return
+    }
+
+    const rows = []
+    // timeSinceStartSeconds is seconds since test start (with 2 decimals)
+    rows.push(['problemIndex', 'description', 'answer', 'timeSinceStartSeconds', 'correct'])
+    answers.forEach((ans, idx) => {
+      const p = problems[idx]
+      if (!ans) {
+        rows.push([idx, p.description, '', '', ''])
+      } else {
+        const seconds = typeof ans.timeSinceStartMs === 'number' ? (ans.timeSinceStartMs / 1000).toFixed(2) : ''
+        rows.push([idx, p.description, ans.answer, seconds, ans.correct])
+      }
+    })
+
+    const csvContent = rows.map(r => r.map(cell => {
+      if (typeof cell === 'string' && (cell.includes(',') || cell.includes('"') || cell.includes('\n'))) {
+        return '"' + cell.replace(/"/g, '""') + '"'
+      }
+      return String(cell)
+    }).join(',')).join('\n')
+
+    const csvBlob = new Blob([csvContent], { type: 'text/csv' })
+    const csvUrl = URL.createObjectURL(csvBlob)
+    const csvLink = document.createElement('a')
+    csvLink.href = csvUrl
+    csvLink.download = `math_number_sense_answers_${new Date().toISOString().split('T')[0]}.csv`
+    document.body.appendChild(csvLink)
+    csvLink.click()
+    document.body.removeChild(csvLink)
+    setTimeout(() => URL.revokeObjectURL(csvUrl), 100)
+  }
 
   const resetTest = () => {
     const newProblems = generateProblemSet(7);
@@ -559,6 +631,36 @@ export default function MathNumberSense() {
 
       <div style={comparisonStyle}>
         Is it larger than: <strong>{currentProblem.comparisonNumber}</strong>?
+      </div>
+
+      <div style={{ marginTop: '1rem' }}>
+        <button
+          onMouseEnter={() => setHoveredAnswer('larger')}
+          onMouseLeave={() => setHoveredAnswer(null)}
+          onClick={() => handleAnswer('larger')}
+          style={{
+            ...btnStyle,
+            marginRight: '0.5rem',
+            background: answers[currentProblemIndex] && answers[currentProblemIndex].answer === 'larger' ? '#004a99' : (hoveredAnswer === 'larger' ? '#005fbf' : btnStyle.background),
+            boxShadow: answers[currentProblemIndex] && answers[currentProblemIndex].answer === 'larger' ? '0 4px 8px rgba(0,75,153,0.25)' : btnStyle.boxShadow
+          }}
+        >
+          Larger
+        </button>
+
+        <button
+          onMouseEnter={() => setHoveredAnswer('smaller')}
+          onMouseLeave={() => setHoveredAnswer(null)}
+          onClick={() => handleAnswer('smaller')}
+          style={{
+            ...secondaryBtnStyle,
+            background: answers[currentProblemIndex] && answers[currentProblemIndex].answer === 'smaller' ? '#cfe8ff' : (hoveredAnswer === 'smaller' ? '#e6f3ff' : secondaryBtnStyle.background),
+            boxShadow: answers[currentProblemIndex] && answers[currentProblemIndex].answer === 'smaller' ? '0 4px 8px rgba(0,102,204,0.12)' : secondaryBtnStyle.boxShadow,
+            border: answers[currentProblemIndex] && answers[currentProblemIndex].answer === 'smaller' ? '2px solid #0066cc' : secondaryBtnStyle.border
+          }}
+        >
+          Smaller
+        </button>
       </div>
 
       <div style={timerStyle}>

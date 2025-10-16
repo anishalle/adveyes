@@ -1,17 +1,18 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import Image from "next/image";
 
 /** Card CPT (game-only) with distractors outside the letter zone */
 const CFG = {
   BLOCKS: 2,
   TRIALS_PER_BLOCK: 30,      // shorter while iterating
   TARGET_RATE: 0.15,
-  ISI_MS: 300,
-  STIM_MS_START: 1000,
+  ISI_MS: 800,
+  STIM_MS_START: 4000,
   STIM_MS_MIN: 600,
-  STIM_MS_MAX: 2000,
-  ADAPT_UP_MISS: 100,
+  STIM_MS_MAX: 10000,
+  ADAPT_UP_MISS: 500,
   ADAPT_DOWN_AFTER_HITS: 3,
   ADAPT_DOWN_STEP: 50,
   DISTRACTOR_PROBS: { none: 0.34, notification: 0.18, banner: 0.12, ripple: 0.1, screen: 0.1, shape: 0.16 },
@@ -25,11 +26,13 @@ const CFG = {
     { title: "Weather", body: "Light rain expected in your area" },
     { title: "Battery Low", body: "20% battery remaining" }
   ],
-  // 52-card deck, pipe-separated for easy splitting elsewhere
-  LETTERS: "Ace of Hearts|2 of Hearts|3 of Hearts|4 of Hearts|5 of Hearts|6 of Hearts|7 of Hearts|8 of Hearts|9 of Hearts|10 of Hearts|Jack of Hearts|Queen of Hearts|King of Hearts|Ace of Diamonds|2 of Diamonds|3 of Diamonds|4 of Diamonds|5 of Diamonds|6 of Diamonds|7 of Diamonds|8 of Diamonds|9 of Diamonds|10 of Diamonds|Jack of Diamonds|Queen of Diamonds|King of Diamonds|Ace of Clubs|2 of Clubs|3 of Clubs|4 of Clubs|5 of Clubs|6 of Clubs|7 of Clubs|8 of Clubs|9 of Clubs|10 of Clubs|Jack of Clubs|Queen of Clubs|King of Clubs|Ace of Spades|2 of Spades|3 of Spades|4 of Spades|5 of Spades|6 of Spades|7 of Spades|8 of Spades|9 of Spades|10 of Spades|Jack of Spades|Queen of Spades|King of Spades",
-  TARGET: "Ace of Hearts",
+  //Letters and letters array are both indexed with i
+  LETTERS: ['7 of diamonds', 'queen of spades', 'jack of spades', '8 of diamonds', '6 of clubs', '9 of hearts', 'ace of hearts', '8 of spades', 'king of clubs', '7 of clubs', '10 of diamonds', '10 of spades', 'black joker', 'jack of clubs', '6 of spades', '4 of hearts', '2 of spades', 'queen of clubs', '3 of hearts', '5 of spades', '6 of diamonds', 'queen of diamonds', '7 of hearts', 'king of hearts', 'ace of clubs', '9 of diamonds', '6 of hearts', '9 of clubs', 'king of diamonds', '4 of spades', '2 of hearts', '3 of diamonds', '10 of hearts', 'king of spades', '8 of clubs', '4 of diamonds', 'jack of diamonds', '3 of spades', '5 of hearts', '7 of spades', 'ace of spades', '5 of diamonds', '9 of spades', 'queen of hearts', 'ace of diamonds', '5 of clubs', '2 of clubs', 'jack of hearts', '10 of clubs', '2 of diamonds', '8 of hearts', 'red joker', '3 of clubs', '4 of clubs'],
+  LETTERSARRAY: ['/cards/7_of_diamonds.png', '/cards/queen_of_spades.png', '/cards/jack_of_spades.png', '/cards/8_of_diamonds.png', '/cards/6_of_clubs.png', '/cards/9_of_hearts.png', '/cards/ace_of_hearts.png', '/cards/8_of_spades.png', '/cards/king_of_clubs.png', '/cards/7_of_clubs.png', '/cards/10_of_diamonds.png', '/cards/10_of_spades.png', '/cards/black_joker.png', '/cards/jack_of_clubs.png', '/cards/6_of_spades.png', '/cards/4_of_hearts.png', '/cards/2_of_spades.png', '/cards/queen_of_clubs.png', '/cards/3_of_hearts.png', '/cards/5_of_spades.png', '/cards/6_of_diamonds.png', '/cards/queen_of_diamonds.png', '/cards/7_of_hearts.png', '/cards/king_of_hearts.png', '/cards/ace_of_clubs.png', '/cards/9_of_diamonds.png', '/cards/6_of_hearts.png', '/cards/9_of_clubs.png', '/cards/king_of_diamonds.png', '/cards/4_of_spades.png', '/cards/2_of_hearts.png', '/cards/3_of_diamonds.png', '/cards/10_of_hearts.png', '/cards/king_of_spades.png', '/cards/8_of_clubs.png', '/cards/4_of_diamonds.png', '/cards/jack_of_diamonds.png', '/cards/3_of_spades.png', '/cards/5_of_hearts.png', '/cards/7_of_spades.png', '/cards/ace_of_spades.png', '/cards/5_of_diamonds.png', '/cards/9_of_spades.png', '/cards/queen_of_hearts.png', '/cards/ace_of_diamonds.png', '/cards/5_of_clubs.png', '/cards/2_of_clubs.png', '/cards/jack_of_hearts.png', '/cards/10_of_clubs.png', '/cards/2_of_diamonds.png', '/cards/8_of_hearts.png', '/cards/red_joker.png', '/cards/3_of_clubs.png', '/cards/4_of_clubs.png'],
+  TARGET: '7 of diamonds',
   RESPONSE_KEYS: ["Space", "Spacebar", " "],
 };
+
 
 const css = `
 :root { --bg:#0e0e10; --fg:#f7f8fb; --muted:#9aa0a6; }
@@ -279,7 +282,6 @@ export default function Page(){
 
   const dataRef = useRef([]);
 
-  const LETTERS = useMemo(()=>CFG.LETTERS.split(""),[]);
 const makePlan = useCallback(() => {
   // 1) Safe, integer N
   const n = Math.max(1, Number(CFG.TRIALS_PER_BLOCK) | 0);
@@ -334,13 +336,12 @@ const makePlan = useCallback(() => {
 
   // 7) Build the block plan
   const plan = [];
-  const LETTERS = CFG.LETTERS.split("|");
   for (let i = 0; i < n; i++) {
     const isT = seq[i] ? 1 : 0;
     let L = CFG.TARGET;
     if (!isT) {
       // pick any non-target card
-      do { L = LETTERS[Math.floor(Math.random() * LETTERS.length)]; }
+      do { L = CFG.LETTERS[Math.floor(Math.random() * CFG.LETTERS.length)]; }
       while (L === CFG.TARGET);
     }
     plan.push({ letter: L, isTarget: isT, distractorLevel: randomType() });
@@ -449,7 +450,7 @@ const makePlan = useCallback(() => {
 
   const nextTrial = ()=>{
     clearTimers();
-    setLetter("");
+    setLetter(null);
     allowRespRef.current = false;
     pressTsRef.current = null;
     timers.current.push(window.setTimeout(runStimulus, CFG.ISI_MS));
@@ -883,6 +884,9 @@ const makePlan = useCallback(() => {
         <div className={`stage ${stage==="intro"?"active":""}`}>
           <h1>Card CPT (Game)</h1>
           <p>Press <b>SPACE</b> when you see the card <b>{CFG.TARGET}</b>. Don’t press for any other card.</p>
+            <div className="flex justify-center items-center">
+              <Image src={CFG.LETTERSARRAY[CFG.LETTERS.indexOf(CFG.TARGET)]} alt={CFG.TARGET} width={200} height={250} />
+            </div>
           <div className="row">
             <button onClick={startTask}>Start</button>
             <button onClick={()=>document.documentElement.requestFullscreen?.()}>Fullscreen</button>
@@ -910,7 +914,16 @@ const makePlan = useCallback(() => {
           >
             <div className="outer" ref={outerRef} />
             <div className="inner" ref={innerRef} />
-            <div className="letter" ref={letterRef}>{letter}</div>
+            <div className="letter" ref={letterRef}>
+              {letter && (
+                <Image
+                  src={CFG.LETTERSARRAY[CFG.LETTERS.indexOf(letter)]}
+                  alt={letter}
+                  width={300}
+                  height={400}
+                />
+              )}
+            </div>
           </div>
         </div>
 

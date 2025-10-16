@@ -14,7 +14,7 @@ const CFG = {
   ADAPT_UP_MISS: 100,
   ADAPT_DOWN_AFTER_HITS: 3,
   ADAPT_DOWN_STEP: 50,
-  DISTRACTOR_PROBS: { none: 0.5, notification: 0.2, pseudo: 0.2, screen: 0.1 },
+  DISTRACTOR_PROBS: { none: 0.4, notification: 0.18, pseudo: 0.18, screen: 0.09, shape: 0.15 },
   DISTRACTOR_ONSET_MS: [120, 200],
   DISTRACTOR_DUR_MS: [1800, 2400], // longer duration for more realistic distractions
   // Notification content for realistic distractions
@@ -164,8 +164,23 @@ button:hover{ background:#2a2e35; }
 /* Pseudo-target style distractor */
 .distractor.pseudo-target {
   font-weight:800;
-  font-size:clamp(56px,12.5vw,120px);
+  font-size:clamp(28px,5vw,48px);
   color:rgba(247,248,251,0.4);
+  padding:8px 16px;
+  border-radius:8px;
+  background:rgba(0,0,0,0.08);
+  max-width:180px;
+  text-align:center;
+}
+
+/* Shape distractor style */
+.distractor.shape-distractor {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  position:absolute;
+  z-index:2;
+  pointer-events:none;
 }
 
 /* Screen effect style distractor */
@@ -565,11 +580,11 @@ const makePlan = useCallback(() => {
       case "pseudo": {
         el.className += " pseudo-target";
         el.textContent = CFG.TARGET;
-        // Pseudo-target size
-        const width = 180, height = 80;
+        // Smaller pseudo-target size
+        const width = 180, height = 48;
         candidatePositions = [
-          {x: W/4, y: 50},
-          {x: W*3/4 - width, y: 50},
+          {x: W/4, y: hudRect.bottom + 12},
+          {x: W*3/4 - width, y: hudRect.bottom + 12},
           {x: W/4, y: H - height - 50},
           {x: W*3/4 - width, y: H - height - 50}
         ];
@@ -579,6 +594,39 @@ const makePlan = useCallback(() => {
         el.className += " screen-effect";
         el.style.opacity = "0.15";
         candidatePositions = [{x:0,y:0}]; // Only one position, covers whole screen
+        break;
+      }
+      case "shape": {
+        el.className += " shape-distractor";
+        // Random shape and color
+        const shapes = ["circle", "square", "triangle"];
+        const colors = ["#e57373", "#64b5f6", "#81c784", "#ffd54f", "#ba68c8", "#ff8a65"];
+        const shape = pick(shapes);
+        const color = pick(colors);
+        const size = ri(40, 80);
+        el.style.width = `${size}px`;
+        el.style.height = `${size}px`;
+        el.style.position = "absolute";
+        el.style.background = "none";
+        el.style.opacity = "0.85";
+        el.style.pointerEvents = "none";
+        // SVG for shape
+        let svg = "";
+        if (shape === "circle") {
+          svg = `<svg width='${size}' height='${size}'><circle cx='${size/2}' cy='${size/2}' r='${size/2-4}' fill='${color}' /></svg>`;
+        } else if (shape === "square") {
+          svg = `<svg width='${size}' height='${size}'><rect x='4' y='4' width='${size-8}' height='${size-8}' rx='12' fill='${color}' /></svg>`;
+        } else if (shape === "triangle") {
+          svg = `<svg width='${size}' height='${size}'><polygon points='${size/2},6 6,${size-6} ${size-6},${size-6}' fill='${color}' /></svg>`;
+        }
+        el.innerHTML = svg;
+        // Candidate positions: grid in safe area, avoid HUD
+        candidatePositions = [];
+        for (let i = 0; i < 4; i++) {
+          let x = ri(20, W - size - 20);
+          let y = ri(hudRect.bottom + 12, H - size - 20);
+          candidatePositions.push({x, y});
+        }
         break;
       }
     }

@@ -3,6 +3,10 @@
 import React, { useState, useMemo, useRef } from "react"
 
 function randInt(min, max) {
+  // Ensure min <= max to avoid NaN ranges
+  if (max < min) {
+    const t = min; min = max; max = t;
+  }
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
@@ -27,15 +31,24 @@ function generateComparisonNumber(problem) {
   
   const strategy = strategies[randInt(0, strategies.length - 1)];
   let comparisonNumber = strategy();
-  
-  while (Math.abs(comparisonNumber - product) < 5 || comparisonNumber < 10) {
+
+  // Safety: cap attempts so we never loop forever
+  let attempts = 0
+  const maxAttempts = 30
+  while ((typeof comparisonNumber !== 'number' || isNaN(comparisonNumber) || Math.abs(comparisonNumber - product) < 5 || comparisonNumber < 10) && attempts < maxAttempts) {
     comparisonNumber = strategy();
+    attempts += 1
   }
-  
+
+  if (attempts >= maxAttempts || typeof comparisonNumber !== 'number' || isNaN(comparisonNumber)) {
+    // Fallback: choose a sensible value near product
+    comparisonNumber = Math.max(10, Math.round(product * 0.7) || 10)
+  }
+
   return Math.max(10, comparisonNumber);
 }
 
-function generateProblemSet(count = 3) {
+function generateProblemSet(count = 7) {
   const problems = [];
   
   for (let i = 0; i < count; i++) {
@@ -81,7 +94,8 @@ function generateProblemSet(count = 3) {
 }
 
 export default function MathNumberSense() {
-  const [problems, setProblems] = useState(null)
+  // Initialize problems synchronously so the page doesn't show a perpetual loading state
+  const [problems, setProblems] = useState(() => generateProblemSet(7))
   const [currentProblemIndex, setCurrentProblemIndex] = useState(0)
   const [testStarted, setTestStarted] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
@@ -95,11 +109,7 @@ export default function MathNumberSense() {
   const timerRef = useRef(null)
   const testStartTimeRef = useRef(null)
 
-  React.useEffect(() => {
-    if (!problems) {
-      setProblems(generateProblemSet(3))
-    }
-  }, [problems])
+  // problems are initialized synchronously above; no useEffect needed
 
   if (!problems) {
     return <div style={{ padding: "2rem", textAlign: "center", fontSize: "1.2rem" }}>Loading...</div>
@@ -326,7 +336,7 @@ export default function MathNumberSense() {
   };
 
   const resetTest = () => {
-    const newProblems = generateProblemSet(3);
+    const newProblems = generateProblemSet(7);
     setProblems(newProblems);
     setCurrentProblemIndex(0);
     audioChunksRef.current = [];

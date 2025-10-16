@@ -384,7 +384,7 @@ export default function MathNumberSense() {
       if (!ans) {
         rows.push([idx, p.description, '', '', ''])
       } else {
-        const seconds = typeof ans.timeSinceStartMs === 'number' ? (ans.timeSinceStartMs / 1000).toFixed(2) : ''
+  const seconds = typeof ans.timeSinceStartMs === 'number' ? (ans.timeSinceStartMs / 1000).toFixed(4) : ''
         rows.push([idx, p.description, ans.answer, seconds, ans.correct])
       }
     })

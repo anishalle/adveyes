@@ -5,19 +5,20 @@ import Image from "next/image";
 
 /** Card CPT (game-only) with distractors outside the letter zone */
 const CFG = {
-  BLOCKS: 2,
-  TRIALS_PER_BLOCK: 30,      // shorter while iterating
+  BLOCKS: 3,
+  TRIALS_PER_BLOCK: 10,      // balanced block size for reliable metrics
   TARGET_RATE: 0.15,
   ISI_MS: 800,
-  STIM_MS_START: 4000,
+  STIM_MS_START: 1300,
   STIM_MS_MIN: 600,
-  STIM_MS_MAX: 10000,
-  ADAPT_UP_MISS: 500,
+  STIM_MS_MAX: 2500,
+  ADAPT_UP_MISS: 120,
   ADAPT_DOWN_AFTER_HITS: 3,
-  ADAPT_DOWN_STEP: 50,
-  DISTRACTOR_PROBS: { none: 0.34, notification: 0.18, banner: 0.12, ripple: 0.1, screen: 0.1, shape: 0.16 },
-  DISTRACTOR_ONSET_MS: [120, 200],
-  DISTRACTOR_DUR_MS: [1800, 2400], // longer duration for more realistic distractions
+  ADAPT_DOWN_STEP: 60,
+  // overall distractor show rate governed by 'none': show ≈ 1 - none
+  DISTRACTOR_PROBS: { none: 0.35, notification: 0.17, banner: 0.12, ripple: 0.1, screen: 0.1, shape: 0.16 },
+  DISTRACTOR_ONSET_MS: [150, 400],
+  DISTRACTOR_DUR_MS: [1500, 2800], // realistic but not overwhelming
   // Notification content for realistic distractions
   NOTIFICATION_CONTENT: [
     { title: "New Message", body: "Sarah: Hey, are you free to chat?" },
@@ -231,7 +232,7 @@ button:hover{ background:#2a2e35; }
 
 .distractor-layer{
   position:absolute; inset:0; pointer-events:none;
-  z-index:1; /* fills the wrap behind the card so distractors appear in empty space */
+  z-index:5; /* above card/arena so distractors are visible; placement still avoids card/HUD */
 }
 
 .summary{
@@ -473,8 +474,8 @@ const makePlan = useCallback(() => {
     let dParams = null;
     if (plan.distractorLevel !== "none") {
       const onset = Math.round(r(...CFG.DISTRACTOR_ONSET_MS));
-  // Randomize distractor duration between 1500ms and 3500ms
-  const dur = Math.round(r(1500, 3500));
+      // Randomize distractor duration using configured range
+      const dur = Math.round(r(...CFG.DISTRACTOR_DUR_MS));
       dParams = spawnDistractor(plan.distractorLevel, onset, dur);
     }
 
@@ -958,17 +959,128 @@ function Summary({ data }){
   const hits = data.filter(d=>d.is_hit).length;
   const om   = data.filter(d=>d.is_omission).length;
   const fa   = data.filter(d=>d.is_commission).length;
+  
+  // Target and non-target counts
+  const targetTrials = data.filter(d=>d.is_target).length;
+  const nonTargetTrials = total - targetTrials;
+  
+  // Rates
+  const hitRate = targetTrials > 0 ? (hits / targetTrials) : 0;
+  const faRate = nonTargetTrials > 0 ? (fa / nonTargetTrials) : 0;
+  const omRate = targetTrials > 0 ? (om / targetTrials) : 0;
+  
+  // Signal detection: d-prime and response bias (c)
+  const hitRateAdj = Math.max(0.01, Math.min(0.99, hitRate)); // avoid 0/1
+  const faRateAdj = Math.max(0.01, Math.min(0.99, faRate));
+  const zHit = Math.sqrt(2) * erfinv(2 * hitRateAdj - 1);
+  const zFA = Math.sqrt(2) * erfinv(2 * faRateAdj - 1);
+  const dPrime = zHit - zFA;
+  const responseBias = -(zHit + zFA) / 2;
+  
+  // RT metrics
   const rtHits = data.filter(d=>d.is_hit && Number.isFinite(d.response_time_ms)).map(d=>d.response_time_ms);
-  const mean = rtHits.length ? Math.round(rtHits.reduce((a,b)=>a+b,0)/rtHits.length) : "—";
-  const sd   = rtHits.length ? Math.round(Math.sqrt(rtHits.map(x => (x-mean)**2).reduce((a,b)=>a+b,0)/rtHits.length)) : "—";
+  const mean = rtHits.length ? rtHits.reduce((a,b)=>a+b,0)/rtHits.length : 0;
+  const sd = rtHits.length > 1 ? Math.sqrt(rtHits.map(x => (x-mean)**2).reduce((a,b)=>a+b,0)/(rtHits.length-1)) : 0;
+  const cv = mean > 0 ? sd / mean : 0;
+  
+  // RT percentiles
+  const rtSorted = [...rtHits].sort((a,b)=>a-b);
+  const median = rtSorted.length ? rtSorted[Math.floor(rtSorted.length/2)] : 0;
+  const p90 = rtSorted.length ? rtSorted[Math.floor(rtSorted.length*0.9)] : 0;
+  
+  // Lapses (RT > 800ms)
+  const lapses = rtHits.filter(rt => rt > 800).length;
+  const lapseRate = rtHits.length > 0 ? lapses / rtHits.length : 0;
+  
+  // Anticipatory responses (RT < 200ms)
+  const anticipatory = rtHits.filter(rt => rt < 200).length;
+  
+  // Distractor effects
+  const withDistractor = data.filter(d=>d.has_distractor===1);
+  const withoutDistractor = data.filter(d=>d.has_distractor===0);
+  
+  const hitsWithD = withDistractor.filter(d=>d.is_hit).length;
+  const hitsWithoutD = withoutDistractor.filter(d=>d.is_hit).length;
+  const targetsWithD = withDistractor.filter(d=>d.is_target).length;
+  const targetsWithoutD = withoutDistractor.filter(d=>d.is_target).length;
+  
+  const hitRateWithD = targetsWithD > 0 ? hitsWithD / targetsWithD : 0;
+  const hitRateWithoutD = targetsWithoutD > 0 ? hitsWithoutD / targetsWithoutD : 0;
+  
+  const rtWithD = withDistractor.filter(d=>d.is_hit && Number.isFinite(d.response_time_ms)).map(d=>d.response_time_ms);
+  const rtWithoutD = withoutDistractor.filter(d=>d.is_hit && Number.isFinite(d.response_time_ms)).map(d=>d.response_time_ms);
+  const meanRtWithD = rtWithD.length ? rtWithD.reduce((a,b)=>a+b,0)/rtWithD.length : 0;
+  const meanRtWithoutD = rtWithoutD.length ? rtWithoutD.reduce((a,b)=>a+b,0)/rtWithoutD.length : 0;
+  
+  // Block-level trends
+  const blocks = [...new Set(data.map(d=>d.block_index))].sort((a,b)=>a-b);
+  const blockStats = blocks.map(b => {
+    const blockData = data.filter(d=>d.block_index===b);
+    const bHits = blockData.filter(d=>d.is_hit).length;
+    const bTargets = blockData.filter(d=>d.is_target).length;
+    const bHitRate = bTargets > 0 ? bHits/bTargets : 0;
+    const bRtHits = blockData.filter(d=>d.is_hit && Number.isFinite(d.response_time_ms)).map(d=>d.response_time_ms);
+    const bMeanRt = bRtHits.length ? bRtHits.reduce((a,b)=>a+b,0)/bRtHits.length : 0;
+    return { block: b, hitRate: bHitRate, meanRt: bMeanRt };
+  });
+  
+  // Helper for inverse error function (approximation)
+  function erfinv(x) {
+    const a = 0.147;
+    const b = 2/(Math.PI * a) + Math.log(1-x*x)/2;
+    const sqrt1 = Math.sqrt(b*b - Math.log(1-x*x)/a);
+    const sqrt2 = Math.sqrt(sqrt1 - b);
+    return Math.sign(x) * sqrt2;
+  }
+  
   return (
     <div className="summary">
+      <h3 style={{gridColumn:'1/-1',margin:'0 0 8px',fontSize:'16px',color:'#e8eaed'}}>Performance Summary</h3>
+      
+      <div style={{gridColumn:'1/-1',borderBottom:'1px solid #2b3036',margin:'4px 0'}}/>
+      <div style={{gridColumn:'1/-1',fontWeight:600,fontSize:'13px',color:'#9aa0a6'}}>Overall Metrics</div>
+      
       <div>Total trials: <b>{total}</b></div>
-      <div>Hits: <b>{hits}</b></div>
-      <div>Omissions: <b>{om}</b></div>
-      <div>Commissions: <b>{fa}</b></div>
-      <div>Hit RT (ms): <b>{mean}</b></div>
-      <div>RT SD (ms): <b>{sd}</b></div>
+      <div>Hits: <b>{hits}</b> ({(hitRate*100).toFixed(1)}%)</div>
+      <div>Omissions: <b>{om}</b> ({(omRate*100).toFixed(1)}%)</div>
+      <div>Commissions (FA): <b>{fa}</b> ({(faRate*100).toFixed(1)}%)</div>
+      
+      <div style={{gridColumn:'1/-1',borderBottom:'1px solid #2b3036',margin:'4px 0'}}/>
+      <div style={{gridColumn:'1/-1',fontWeight:600,fontSize:'13px',color:'#9aa0a6'}}>Signal Detection</div>
+      
+      <div>d-prime (d'): <b>{dPrime.toFixed(2)}</b></div>
+      <div>Response bias (c): <b>{responseBias.toFixed(2)}</b></div>
+      
+      <div style={{gridColumn:'1/-1',borderBottom:'1px solid #2b3036',margin:'4px 0'}}/>
+      <div style={{gridColumn:'1/-1',fontWeight:600,fontSize:'13px',color:'#9aa0a6'}}>Response Time (Hits)</div>
+      
+      <div>Mean RT: <b>{Math.round(mean)} ms</b></div>
+      <div>SD: <b>{Math.round(sd)} ms</b></div>
+      <div>Median RT: <b>{Math.round(median)} ms</b></div>
+      <div>90th percentile: <b>{Math.round(p90)} ms</b></div>
+      <div>Coefficient of variation: <b>{cv.toFixed(2)}</b></div>
+      <div>Lapses (RT&gt;800ms): <b>{lapses}</b> ({(lapseRate*100).toFixed(1)}%)</div>
+      <div>Anticipatory (RT&lt;200ms): <b>{anticipatory}</b></div>
+      
+      <div style={{gridColumn:'1/-1',borderBottom:'1px solid #2b3036',margin:'4px 0'}}/>
+      <div style={{gridColumn:'1/-1',fontWeight:600,fontSize:'13px',color:'#9aa0a6'}}>Distractor Effects</div>
+      
+      <div>Trials with distractor: <b>{withDistractor.length}</b></div>
+      <div>Trials without distractor: <b>{withoutDistractor.length}</b></div>
+      <div>Hit rate (with distractor): <b>{(hitRateWithD*100).toFixed(1)}%</b></div>
+      <div>Hit rate (no distractor): <b>{(hitRateWithoutD*100).toFixed(1)}%</b></div>
+      <div>Mean RT (with distractor): <b>{Math.round(meanRtWithD)} ms</b></div>
+      <div>Mean RT (no distractor): <b>{Math.round(meanRtWithoutD)} ms</b></div>
+      
+      <div style={{gridColumn:'1/-1',borderBottom:'1px solid #2b3036',margin:'4px 0'}}/>
+      <div style={{gridColumn:'1/-1',fontWeight:600,fontSize:'13px',color:'#9aa0a6'}}>Block-Level Trends</div>
+      
+      {blockStats.map(bs => (
+        <React.Fragment key={bs.block}>
+          <div>Block {bs.block} hit rate: <b>{(bs.hitRate*100).toFixed(1)}%</b></div>
+          <div>Block {bs.block} mean RT: <b>{Math.round(bs.meanRt)} ms</b></div>
+        </React.Fragment>
+      ))}
     </div>
   );
 }

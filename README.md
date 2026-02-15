@@ -1,4 +1,7 @@
 # ADVEYES
+
+🏆 ACM SYMPOSIUM SECOND PLACE FINISH!
+
 Prep:
 
 Remove the venv folder

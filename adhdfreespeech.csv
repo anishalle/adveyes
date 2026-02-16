@@ -1,0 +1,11 @@
+Participant Name,Mean Pitch (Hz),Pitch Score,Jitter (local %),Jitter Score,HNR (dB),HNR Score,Combined Score,Prediction,Correctly Predicted?
+Akhil Naravatla,124.724,0.253223461,4.071,-0.352830189,10.188,0.247083333,0.284,Non-ADHD,No
+Arunabha Mittra,121.016,0.073485216,1.592,-1.021024259,12.441,1.185833333,0.76,Non-ADHD,No
+Jackson Clabiorne,,,,,,,,,
+Jacob Ishida,,,,,,,,,
+Jade Lopez,,,,,,,,,
+Janaki Sankar,,,,,,,,,
+Muhammed Hasan Abbasi,,,,,,,,,
+Saisatvik Eatrouthu,102.012,-0.847697528,2.09,-0.886792453,9.714,0.049583333,0.595,Non-ADHD,No
+Sebastian Venegas,,,,,,,,,
+Soham Samantaray,130.897,0.552447891,2.12,-0.878706199,13.675,1.7,1.044,ADHD,Yes

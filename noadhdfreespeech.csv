@@ -1,0 +1,4 @@
+Participant,Mean Pitch (Hz),Pitch Score,Jitter (local %),Jitter Score,HNR (dB),HNR Score,Combined Score,Prediction,Correctly Predicted?
+John Ramirez,125.323,0.282258846,2.209,-0.854717,11.753,0.899167,0.679,Non-ADHD,Yes
+Cody Washington,125.73,0.301987397,2.565,-0.75876,10.619,0.426667,0.496,Non-ADHD,Yes
+Davis Behaj,146.888,1.327581192,3.108,-0.612399,7.906,-0.70375,0.881,Non-ADHD,Yes
